@@ -62,6 +62,13 @@ int main(int argc, char**argv) {
     ROS_INFO("sending goal");
     client.sendGoalAndWait(goal);
 
+    ROS_INFO("cancelling goal");
+    ros::Publisher pub1 = n.advertise<actionlib_msgs::GoalID> 
+        ("/move_base/cancel", 1000); 
+    actionlib_msgs::GoalID msg;
+    msg.id = "";
+    pub1.publish(msg); 
+
     if (client.getState() == actionlib::SimpleClientGoalState::ABORTED) {
       ROS_INFO("Aborted");
     } else if (client.getState() == actionlib::SimpleClientGoalState::PREEMPTED) {
