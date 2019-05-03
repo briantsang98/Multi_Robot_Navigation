@@ -8,6 +8,8 @@
 #include <message_filters/time_synchronizer.h>
 #include <nav_msgs/Odometry.h>
 #include <algorithm>
+#include <boost/thread/thread.hpp>
+#include <string>
 using namespace nav_msgs;
 using namespace message_filters;
 
@@ -15,48 +17,16 @@ typedef actionlib::SimpleActionClient<plan_execution::ExecutePlanAction> Client;
 
 using namespace std;
 
-// ros::NodeHandle n;
-// ros::NodeHandle privateNode("~");
-
-// void reportMarvin(Client& marvin_client) {
-//   if (marvin_client.getState() == actionlib::SimpleClientGoalState::ABORTED) {
-//     ROS_INFO("marvin: Aborted");
-//   }
-//   else if (marvin_client.getState() == actionlib::SimpleClientGoalState::PREEMPTED) {
-//     ROS_INFO("marvin: Preempted");
-//   }
-  
-//   else if (marvin_client.getState() == actionlib::SimpleClientGoalState::SUCCEEDED) {
-//     ROS_INFO("marvin: Succeeded!");
-//   }
-//   else
-//      ROS_INFO("marvin: Terminated");
-// }
-
-// void reportRoberto(Client& roberto_client) {
-//   if (roberto_client.getState() == actionlib::SimpleClientGoalState::ABORTED) {
-//     ROS_INFO("roberto: Aborted");
-//   }
-//   else if (roberto_client.getState() == actionlib::SimpleClientGoalState::PREEMPTED) {
-//     ROS_INFO("roberto: Preempted");
-//   }
-  
-//   else if (roberto_client.getState() == actionlib::SimpleClientGoalState::SUCCEEDED) {
-//     ROS_INFO("roberto: Succeeded!");
-//   }
-//   else
-//      ROS_INFO("roberto: Terminated");
-// }
-
 class Visit_Door {
 public:
   Visit_Door(ros::NodeHandle* nh);
   void run();
   void callback(const nav_msgs::Odometry::ConstPtr &roberto_odom, const nav_msgs::Odometry::ConstPtr &marvin_odom);
   bool checkForInterruption(geometry_msgs::Point robot1, geometry_msgs::Point robot2);
+  void task_interrupt(int* publish_rate);
+  bool goToSafeZone(const std::string);
 
 protected: 
-
     ros::NodeHandle *nh_;
     Client *roberto_client; 
     Client *marvin_client; 
@@ -72,47 +42,96 @@ Visit_Door::Visit_Door( ros::NodeHandle* nh )
   // marvin_client->waitForServer(); 
     
 }
-bool Visit_Door::checkForInterruption(geometry_msgs::Point robot1, geometry_msgs::Point robot2) {  
-  if(abs(robot1.x - robot2.x)>2.0){
-    ROS_INFO_STREAM("x diff :"<<abs(robot1.x - robot2.x));
-    return false;
+bool Visit_Door::goToSafeZone(const std::string robot_name) {
+  string location = "ia_1";
+  plan_execution::ExecutePlanGoal goal;
+  plan_execution::AspRule rule;
+  plan_execution::AspFluent fluent;
+  fluent.name = "not facing";
+
+  ROS_INFO_STREAM(robot_name<<" going to " << location);
+  fluent.variables.push_back(location);
+
+  rule.body.push_back(fluent);
+  goal.aspGoal.push_back(rule);
+
+  if(robot_name.compare("roberto")==0){
+    roberto_client->sendGoal(goal);  
+    if(roberto_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+      return true;
   }
-  return true;
+  else {
+    marvin_client->sendGoal(goal);  
+    if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+      return true;
+  }
+  ros::spin();
+  return false;
+}
+bool Visit_Door::checkForInterruption(geometry_msgs::Point robot1, geometry_msgs::Point robot2) {  
+  ROS_INFO_STREAM(robot1.x<<" "<<robot2.x);
+  if(robot1.x < robot2.x && abs(robot1.x-robot2.x)<3.0){
+    ROS_INFO_STREAM("x diff :"<<abs(robot1.x - robot2.x));
+    return true;
+  }
+  return false;
 }
 void Visit_Door::callback(const nav_msgs::Odometry::ConstPtr &roberto_odom, const nav_msgs::Odometry::ConstPtr &marvin_odom)
 {  
   // ROS_INFO_STREAM("Marvin " << marvin_odom->pose.pose.position.x);
-  ROS_INFO_STREAM("interaction_point" << min(roberto_odom->pose.pose.position.x,marvin_odom->pose.pose.position.x) + (abs(roberto_odom->pose.pose.position.x - marvin_odom->pose.pose.position.x) / 2));
+  // ROS_INFO_STREAM("interaction_point" << min(roberto_odom->pose.pose.position.x,marvin_odom->pose.pose.position.x) + (abs(roberto_odom->pose.pose.position.x - marvin_odom->pose.pose.position.x) / 2));
   // if((int)marvin_odom->pose.pose.position.x > 19 && (int)marvin_odom->pose.pose.position.x < 22) {    
-  if(abs(marvin_odom->pose.pose.position.x -marvin_odom->pose.pose.position.x) < 2.0) {    
-    ROS_INFO_STREAM("Stopping roberto and marvin");    
+  ROS_INFO_STREAM("Diff"<<abs(marvin_odom->pose.pose.position.x - roberto_odom->pose.pose.position.x));
+  if(abs(marvin_odom->pose.pose.position.x - roberto_odom->pose.pose.position.x) < 5.0) {        
     ros::Publisher pub1 = nh_->advertise<actionlib_msgs::GoalID> 
-        ("/roberto/move_base/cancel", 1000); 
+        ("/roberto/move_base/cancel", 1000, true); 
         ros::Publisher pub2 = nh_->advertise<actionlib_msgs::GoalID> 
-        ("/marvin/move_base/cancel", 1000); 
+        ("/marvin/move_base/cancel", 1000, true); 
     actionlib_msgs::GoalID msg;
     msg.id = "";
-    bool interrupt_flag = true;
-    while(interrupt_flag){
+    static bool interrupt_flag = true;
+    if(marvin_odom->pose.pose.position.x > roberto_odom->pose.pose.position.x){
+      if(checkForInterruption(marvin_odom->pose.pose.position, roberto_odom->pose.pose.position)){
+        interrupt_flag = false;
+      }  
+    } 
+    else{
+      if(checkForInterruption(roberto_odom->pose.pose.position, marvin_odom->pose.pose.position)){
+        interrupt_flag = false;
+      }  
+    }
+    ROS_INFO_STREAM("Flag"<<interrupt_flag);
+
+    while(interrupt_flag){    
+      // goToSafeZone("roberto");  
       pub1.publish(msg);   
-      pub2.publish(msg);   
-      // if(checkForInterruption(marvin_odom->pose.pose.position, roberto_odom->pose.pose.position)){
-      //   interrupt_flag = false;
-      // }
+      // pub2.publish(msg);   
+      // ROS_INFO_STREAM(marvin_odom->pose.pose.position.x<<" "<<roberto_odom->pose.pose.position.x);            
     }    
   
   }
+}
 
+void Visit_Door::task_interrupt(int* publish_rate) {
+  
+  // ros::Rate loop_rate(*publish_rate);
+  message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
+  message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
+  TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
+  ROS_INFO_STREAM("task_interrupt function"); 
+  sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));  
+  ROS_INFO_STREAM("task_interrupt function111111"); 
+  // sync.registerCallback(&Visit_Door::callback, this, _1, _2);  
 }
 
 void Visit_Door::run() 
 {
   std::vector<string> doors;
 
-  doors.push_back("d3_414b1");    
-  doors.push_back("d3_414a2");
+  doors.push_back("d3_414b1");
   doors.push_back("d3_414b2");
-  doors.push_back("d3_414a2");  
+  doors.push_back("d3_414a1");
+  doors.push_back("d3_414a2");
      
   
   int marvin_door = 0;
@@ -152,12 +171,16 @@ void Visit_Door::run()
   marvin_client->sendGoal(marvin_goal);
   roberto_client->sendGoal(roberto_goal);
 
+  message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
+  message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
+  TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
+  sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
+  
   while(ros::ok()) {
-    message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
-    message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
-    TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
-    sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
-    ROS_INFO_STREAM("in main");
+    // message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
+    // message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
+    // TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
+    // sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
     if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
       marvin_location = doors.at(marvin_door);
       marvin_door += 1;
@@ -207,14 +230,19 @@ void Visit_Door::run()
     ros::spin();
 
   }
+  return;
 }
+
 int main(int argc, char**argv) {
   ros::init(argc, argv, "multi_robot_navigation");
 
+    // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   ros::NodeHandle privateNode("~");
   Visit_Door visit_door(&nh);
+  
   visit_door.run();
+  // thread_odom.join();
   
   return 0;
 }
