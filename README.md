@@ -1,11 +1,12 @@
-# Run commands
+#Run commands
 - roslaunch bwi_launch multi_robot_simulation.launch
 - rosrun bwi_tasks multi_robot_navigation 
 
-# Main files
+#Main files
 - bwi_common/bwi_tasks/src/multi_robot_navigation.cpp
 - bwi_common/utexas_gdc/maps/simulation/multimap2/3ne/objects.yaml
 
+#Algorithm
 - Defining objects (parking zones) on the map:
 --- rosrun bwi_planning_common logical_marker _map_file:=/catkin_ws/src/bwi_common/utexas_gdc/maps/simulation/multimap2/3ne/3ne.yaml _data_directory:=/catkin_ws/src/bwi_common/utexas_gdc/maps/simulation/multimap2/3ne
 
