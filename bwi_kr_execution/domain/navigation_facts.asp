@@ -168,6 +168,7 @@ door(d3_414b2).
 door(d3_414b1). 
 door(d3_432). 
 door(d3_436).
+door(d3_222).
 
 door(d3_824).
 door(d3_816a).
@@ -202,6 +203,13 @@ door(d1_210b).
 door(d1_304a).
 door(d1_304b).
 door(d1_728).
+
+door(ia_2).
+door(ia_3).
+door(ia_4).
+door(ia_5).
+door(ia_6).
+door(ia_7).
 
 hasdoor(l4_440,d4_440). 
 hasdoor(l4_438,d4_440). 
@@ -408,6 +416,9 @@ hasdoor(l1_302, d1_304b).
 hasdoor(l1_728, d1_728).
 hasdoor(l1_700, d1_728).
 
+hasdoor(l3_500,d3_222. 
+hasdoor(l3_516,d3_222). 
+
 acc(l4_300, l4_200). 
 acc(l4_400, l4_406). 
 acc(l4_406, l4_500). 
@@ -591,6 +602,9 @@ inside(o3_514_tablea, l3_514).
 
 object(o3_514_tableb).
 inside(o3_514_tableb, l3_514). 
+
+object(ia_1).
+inside(ia_1, l3_514). 
 
 badDoor(d3_414a3).
 badDoor(d3_414b3).

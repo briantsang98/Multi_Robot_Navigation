@@ -87,6 +87,12 @@ door(d2_702_north).
 door(d2_702_east).
 door(d2_700).
 
+door(ia_2).
+door(ia_3).
+door(ia_4).
+door(ia_5).
+door(ia_6).
+door(ia_7).
 
 hasdoor(l3_400,d3_404).
 hasdoor(l3_404,d3_404).

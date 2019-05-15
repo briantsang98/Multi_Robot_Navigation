@@ -3,144 +3,356 @@
 
 #include <actionlib/client/simple_action_client.h>
 
+#include <bwi_planning_common/structures.h>
+#include <bwi_planning_common/utils.h>
+#include <bwi_planning_common/interactions.h>
+
 #include <ros/ros.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
+#include <move_base_msgs/MoveBaseAction.h>
+#include <bwi_tools/point.h>
+#include <nav_msgs/GetPlan.h>
 #include <nav_msgs/Odometry.h>
 #include <algorithm>
-#include <boost/thread/thread.hpp>
 #include <string>
-using namespace nav_msgs;
-using namespace message_filters;
-
-typedef actionlib::SimpleActionClient<plan_execution::ExecutePlanAction> Client;
+#include <limits.h>
+#include <time.h>
 
 using namespace std;
+using namespace geometry_msgs;
+using namespace nav_msgs;
+using namespace message_filters;
+using namespace bwi_planning_common;
+typedef actionlib::SimpleActionClient<plan_execution::ExecutePlanAction> Client;
+
+string global_frame_id_ = "roberto/level_mux_map";
+
 
 class Visit_Door {
 public:
   Visit_Door(ros::NodeHandle* nh);
   void run();
-  void callback(const nav_msgs::Odometry::ConstPtr &roberto_odom, const nav_msgs::Odometry::ConstPtr &marvin_odom);
-  bool checkForInterruption(geometry_msgs::Point robot1, geometry_msgs::Point robot2);
-  void task_interrupt(int* publish_rate);
-  bool goToSafeZone(const std::string);
+  void callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom);
+  bool checkForInterruption(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom);
+  Door getNearestSafeZone(const geometry_msgs::Point &ip);
+  void goToSafeZone(Door safeZone, Client *client, bool &interrupt_flag);
+  bool safeInteraction(const Point &pt, const Point &roberto_odom, const Point &marvin_odom);
+  vector<geometry_msgs::Point> getInteractionPoints(const Point &start_pt, const Point &goal_pt);
+  geometry_msgs::Point getIteractionPoint(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom);  
+  bool checkRobotsDirection(vector<int> &distances);
 
 protected: 
     ros::NodeHandle *nh_;
     Client *roberto_client; 
     Client *marvin_client; 
-
+    bool interrupt_flag;
+    std::map<std::string, geometry_msgs::Pose> safeZones;
+    // std::vector<Door> safeZones;
+    ros::ServiceClient make_plan_client_roberto;
+    ros::ServiceClient make_plan_client_marvin;
+    vector<int>robot_distances;
 };
 
 Visit_Door::Visit_Door( ros::NodeHandle* nh )
 {
   nh_ = nh;
-
   marvin_client = new Client("/marvin/action_executor/execute_plan", true);
   roberto_client = new Client("/roberto/action_executor/execute_plan", true);
-  // marvin_client->waitForServer(); 
-    
+  interrupt_flag = true;
+  std::string data_directory = "/home/users/NI2452/catkin_ws/src/bwi_common/utexas_gdc/maps/simulation/3ne";
+  std::string loc_file = bwi_planning_common::getObjectsFileLocationFromDataDirectory(data_directory);
+  ROS_INFO_STREAM("Reading safeZones file: " + loc_file);
+  bwi_planning_common::readObjectApproachFile(loc_file, safeZones);
+  // bwi_planning_common::readDoorFile(loc_file, safeZones);
 }
-bool Visit_Door::goToSafeZone(const std::string robot_name) {
-  string location = "ia_1";
+
+std::vector<geometry_msgs::Point> Visit_Door::getInteractionPoints(const geometry_msgs::Point &start_pt, const geometry_msgs::Point &goal_pt){
+  std::vector<geometry_msgs::Point> interaction_points;
+  GetPlan srv;
+  geometry_msgs::PoseStamped &start = srv.request.start;
+  geometry_msgs::PoseStamped &goal = srv.request.goal;
+
+  start.header.frame_id = goal.header.frame_id = global_frame_id_;
+  start.header.stamp = goal.header.stamp = ros::Time::now();
+
+  start.pose.position.x = start_pt.x;
+  start.pose.position.y = start_pt.y;
+  start.pose.position.z = 0;
+  start.pose.orientation.w = 1.0;
+
+  goal.pose.position.x = goal_pt.x;
+  goal.pose.position.y = goal_pt.y;
+  goal.pose.position.z = 0;
+  goal.pose.orientation.w= 1.0;
+  srv.request.tolerance = 0.5 + 1e-6;
+
+  interaction_points.push_back(start.pose.position);
+
+  if (!make_plan_client_roberto) {
+    ROS_INFO("Persistent service connection to failed");
+  }
+  bool make_plan_client_initialized_ = false;
+  if (!make_plan_client_initialized_) {    
+    make_plan_client_roberto = nh_->serviceClient<nav_msgs::GetPlan>("roberto/move_base/NavfnROS/make_plan");
+    make_plan_client_roberto.waitForExistence();  
+    make_plan_client_initialized_ = true;
+  }
+  float old_pt_x, old_pt_y, new_pt_x, new_pt_y;
+  if (make_plan_client_roberto.call(srv)) {
+    if (srv.response.plan.poses.size() != 0) {
+      for(int i = 0 ; i< srv.response.plan.poses.size() ; i++){
+        geometry_msgs::PoseStamped p = srv.response.plan.poses[i];        
+        old_pt_x = interaction_points.back().x;
+        old_pt_y = interaction_points.back().y;
+        new_pt_x = p.pose.position.x;
+        new_pt_y = p.pose.position.y;
+        if(abs(new_pt_x - old_pt_x)>1 || abs(new_pt_y-old_pt_y)>1){
+          interaction_points.push_back(p.pose.position);
+          // ROS_INFO("x = %f, y = %f", p.pose.position.x, p.pose.position.y);
+        }        
+      }  
+    } else {        
+      ROS_INFO_STREAM("Empty plan");
+    }
+  } else {
+    ROS_INFO_STREAM("service failed");
+  }
+  return interaction_points;
+}
+geometry_msgs::Point Visit_Door::getIteractionPoint(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom) {
+  std::vector<geometry_msgs::Point> interaction_points = getInteractionPoints(roberto_odom->pose.pose.position, marvin_odom->pose.pose.position);
+  int size = interaction_points.size();
+  ROS_INFO_STREAM("Size:"<<size);
+  return interaction_points[size/2];
+}
+
+string Visit_Door::getNearestSafeZone(const geometry_msgs::Point &ip) {
+ 
+  string nearestZone; 
+  std::vector<float> distances;
+  float min_distance = INT_MAX, distance;
+  geometry_msgs::Point safe_zone;
+
+  map<string, geometry_msgs::Pose>::iterator it;
+  for(it = safeZones.begin(); it != safeZones.end(); it++ )
+  {
+    safe_zone.x = it->second.position.x;
+    safe_zone.y = it->second.position.y;
+
+    distance = getInteractionPoints(safe_zone, ip).size(); // returns the number of poses btw interaction point and parking zone
+    if (distance < min_distance){
+      min_distance = distance;
+      nearestZone = it->first;
+    }
+  }
+  // for(int i = 0 ; i < safeZones.size() ; i++) {
+
+  //   safe_zone.x = (safeZones[i].door_corners[0].x + safeZones[i].door_corners[1].x) /2 ;
+  //   safe_zone.y = (safeZones[i].door_corners[0].y + safeZones[i].door_corners[1].y) /2 ;
+
+  //   distance = getInteractionPoints(safe_zone, ip).size(); // returns the number of poses btw interaction point and parking zone
+  //   if (distance < min_distance){
+  //     min_distance = distance;
+  //     nearestZone = safeZones[i];
+  //   }
+  // }
+  ROS_INFO_STREAM("nearestZone: "<<nearestZone);
+  return nearestZone;
+}
+
+void Visit_Door::goToSafeZone(Door safeZone, Client *client, bool &interrupt_flag) {
+
+  // move_base_msgs::MoveBaseGoal goal;
+
+  // goal.target_pose.header.frame_id = "base_link";
+  // goal.target_pose.header.stamp = ros::Time::now();
+
+  // goal.target_pose.pose.position.x = (safeZone.door_corners[0].x + safeZone.door_corners[1].x)/2;//1.0;
+  // goal.target_pose.pose.position.y = (safeZone.door_corners[0].y + safeZone.door_corners[1].y)/2;//1.0;
+  // goal.target_pose.pose.orientation.w = 1.0;
+
+  // ROS_INFO("Sending goal");
+  // client->sendGoal(goal);
+
+  // client->waitForResult();
+
+  // if(client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+  //   interrupt_flag = false;
+
+  string location = "d3_402";
   plan_execution::ExecutePlanGoal goal;
   plan_execution::AspRule rule;
   plan_execution::AspFluent fluent;
   fluent.name = "not facing";
 
-  ROS_INFO_STREAM(robot_name<<" going to " << location);
+  ROS_INFO_STREAM("going to " << location);
   fluent.variables.push_back(location);
 
   rule.body.push_back(fluent);
   goal.aspGoal.push_back(rule);
-
-  if(robot_name.compare("roberto")==0){
-    roberto_client->sendGoal(goal);  
-    if(roberto_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
-      return true;
+  client->sendGoalAndWait(goal);  
+  if(client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
+    ROS_INFO_STREAM("Moved to safe zone, resume goal");
+    interrupt_flag = false;
   }
-  else {
-    marvin_client->sendGoal(goal);  
-    if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
-      return true;
-  }
-  ros::spin();
-  return false;
 }
-bool Visit_Door::checkForInterruption(geometry_msgs::Point robot1, geometry_msgs::Point robot2) {  
-  ROS_INFO_STREAM(robot1.x<<" "<<robot2.x);
-  if(robot1.x < robot2.x && abs(robot1.x-robot2.x)<3.0){
-    ROS_INFO_STREAM("x diff :"<<abs(robot1.x - robot2.x));
+bool Visit_Door::checkForInterruption(const Odometry::ConstPtr &robot1_odom, const Odometry::ConstPtr &robot2_odom) {  
+  // ROS_INFO_STREAM(robot1_odom->pose.pose.position.x<<" "<<robot2_odom->pose.pose.position.x);  
+  // getIteractionPoint(robot1_odom, robot2_odom);
+  if(abs(robot1_odom->pose.pose.position.x-robot2_odom->pose.pose.position.x)<5.0){
+  // if(robot1_odom->pose.pose.position.x < robot2_odom->pose.pose.position.x && abs(robot1_odom->pose.pose.position.x-robot2_odom->pose.pose.position.x)<5.0){
+    ROS_INFO_STREAM("x diff :"<<abs(robot1_odom->pose.pose.position.x - robot2_odom->pose.pose.position.x));
     return true;
   }
   return false;
 }
-void Visit_Door::callback(const nav_msgs::Odometry::ConstPtr &roberto_odom, const nav_msgs::Odometry::ConstPtr &marvin_odom)
-{  
-  // ROS_INFO_STREAM("Marvin " << marvin_odom->pose.pose.position.x);
-  // ROS_INFO_STREAM("interaction_point" << min(roberto_odom->pose.pose.position.x,marvin_odom->pose.pose.position.x) + (abs(roberto_odom->pose.pose.position.x - marvin_odom->pose.pose.position.x) / 2));
-  // if((int)marvin_odom->pose.pose.position.x > 19 && (int)marvin_odom->pose.pose.position.x < 22) {    
-  ROS_INFO_STREAM("Diff"<<abs(marvin_odom->pose.pose.position.x - roberto_odom->pose.pose.position.x));
-  if(abs(marvin_odom->pose.pose.position.x - roberto_odom->pose.pose.position.x) < 5.0) {        
+bool Visit_Door::checkRobotsDirection(vector<int> &distances){
+  //increasing distance - robots moving away
+  int size = distances.size();
+  int i = size-10 > 0 ? size-10 : 0; // check the latest 10 distances only
+  int count = 0;
+  for( ; i<size-1 ; i++) {
+    ROS_INFO_STREAM(distances[i]<<" ");
+    if(distances[i]<distances[i+1]) {
+      //to avoid errors, we check if atleast two values are contradicting
+      count++;
+      if(count==2)
+        break;
+    }
+  }
+  ROS_INFO_STREAM("i::"<<i<<" distances size::"<<distances.size()-1);
+  if(i!=distances.size()-1){
+    return false;
+  }
+  return true;
+}
+bool Visit_Door::safeInteraction(const Point &ip, const Point &roberto_odom, const Point &marvin_odom) {
+  float tolerance = 2.0;
+  Point safe_zone;
+  robot_distances.push_back(getInteractionPoints(roberto_odom, marvin_odom).size());
+  //1 - Robots interact in safe zone
+  for(int i = 0 ; i < safeZones.size() ; i++) {
+    safe_zone.x = (safeZones[i].door_corners[0].x + safeZones[i].door_corners[1].x ) /2;
+    safe_zone.y = (safeZones[i].door_corners[0].y + safeZones[i].door_corners[1].y ) /2;    
+
+    //check if the interaction point is in the safe zone
+    if(abs(safe_zone.x - ip.x)<tolerance && abs(safe_zone.y - ip.y)<tolerance)
+      return true;
+  }
+
+  //2 - Robots are moving away from each other
+  if(checkRobotsDirection(robot_distances)){
+    //false - moving towards each other
+    //true - moving away from each other
+    ROS_INFO_STREAM("robots moving away from each other");
+    return true;
+
+  }
+
+  //Robots are moving towards and they dont interact in safe zone
+  ROS_INFO_STREAM("robots moving towards each other");
+  return false;
+}
+void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom)
+{    
+  Point ip = getIteractionPoint(roberto_odom, marvin_odom);
+  ROS_INFO_STREAM("interaction point::"<<ip.x<<" "<<ip.y);
+  //check if interaction takes place in safeZone
+  if(safeInteraction(ip, roberto_odom->pose.pose.position, marvin_odom->pose.pose.position)){
+    ROS_INFO_STREAM("interaction taking place in safe zone, redirection not needed");
+  }
+  else{
+    string nearZone = getNearestSafeZone(ip);
+    Point nearZone_pt;
+    nearZone_pt.x = (nearZone.door_corners[0].x + nearZone.door_corners[1].x)/2;
+    nearZone_pt.y = (nearZone.door_corners[0].y + nearZone.door_corners[1].y)/2;
+    float roberto_zone_dist = getInteractionPoints(roberto_odom->pose.pose.position, nearZone_pt).size();
+    float marvin_zone_dist = getInteractionPoints(marvin_odom->pose.pose.position, nearZone_pt).size();
+
     ros::Publisher pub1 = nh_->advertise<actionlib_msgs::GoalID> 
         ("/roberto/move_base/cancel", 1000, true); 
-        ros::Publisher pub2 = nh_->advertise<actionlib_msgs::GoalID> 
+    ros::Publisher pub2 = nh_->advertise<actionlib_msgs::GoalID> 
         ("/marvin/move_base/cancel", 1000, true); 
     actionlib_msgs::GoalID msg;
     msg.id = "";
-    static bool interrupt_flag = true;
-    if(marvin_odom->pose.pose.position.x > roberto_odom->pose.pose.position.x){
-      if(checkForInterruption(marvin_odom->pose.pose.position, roberto_odom->pose.pose.position)){
-        interrupt_flag = false;
-      }  
-    } 
-    else{
-      if(checkForInterruption(roberto_odom->pose.pose.position, marvin_odom->pose.pose.position)){
-        interrupt_flag = false;
-      }  
+    
+    ROS_INFO_STREAM("roberto dis:"<<roberto_zone_dist<<" Marvin dis:"<<marvin_zone_dist);
+    //roberto closer to interaction point
+    if(roberto_zone_dist < marvin_zone_dist) {      
+      clock_t initialTime = clock();
+      while(interrupt_flag)
+      {
+        // if ((clock() - initialTime) / CLOCKS_PER_SEC >= 10) // time in seconds
+        //   break;
+        pub1.publish(msg);
+        // ROS_INFO_STREAM("Stopping roberto");
+        // roberto_client->cancelGoal();
+        // goToSafeZone(nearZone, roberto_client, interrupt_flag);
+      }      
     }
-    ROS_INFO_STREAM("Flag"<<interrupt_flag);
 
-    while(interrupt_flag){    
-      // goToSafeZone("roberto");  
-      pub1.publish(msg);   
-      // pub2.publish(msg);   
-      // ROS_INFO_STREAM(marvin_odom->pose.pose.position.x<<" "<<roberto_odom->pose.pose.position.x);            
-    }    
-  
+    //marvin closer to interaction point
+    else {
+      clock_t initialTime = clock();
+      while(interrupt_flag)
+      {
+        // if ((clock() - initialTime) / CLOCKS_PER_SEC >= 10) // time in seconds
+        //   break;
+        pub2.publish(msg);
+        // ROS_INFO_STREAM("Stopping marvin");
+        // marvin_client->cancelGoal();
+        goToSafeZone(nearZone, marvin_client, interrupt_flag);
+      }      
+    }
   }
-}
+  // if(abs(marvin_odom->pose.pose.position.x - roberto_odom->pose.pose.position.x) < 5.0) {        
+  //   ros::Publisher pub1 = nh_->advertise<actionlib_msgs::GoalID> 
+  //       ("/roberto/move_base/cancel", 1000, true); 
+  //   ros::Publisher pub2 = nh_->advertise<actionlib_msgs::GoalID> 
+  //       ("/marvin/move_base/cancel", 1000, true); 
+  //   actionlib_msgs::GoalID msg;
+  //   msg.id = "";
+        
+  //   ROS_INFO_STREAM("Flag: "<<interrupt_flag);
 
-void Visit_Door::task_interrupt(int* publish_rate) {
-  
-  // ros::Rate loop_rate(*publish_rate);
-  message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
-  message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
-  TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
-  ROS_INFO_STREAM("task_interrupt function"); 
-  sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));  
-  ROS_INFO_STREAM("task_interrupt function111111"); 
-  // sync.registerCallback(&Visit_Door::callback, this, _1, _2);  
+  //   while(interrupt_flag){    
+  //     // goToSafeZone("roberto");  
+  //     if(marvin_odom->pose.pose.position.x > roberto_odom->pose.pose.position.x){
+  //       if(checkForInterruption(marvin_odom, roberto_odom)){
+  //         interrupt_flag = false;
+  //       }  
+  //     } 
+  //     else{
+  //       if(checkForInterruption(roberto_odom, marvin_odom)){
+  //         interrupt_flag = false;
+  //       }  
+  //     }
+  //     pub1.publish(msg);   
+  //     // pub2.publish(msg);   
+  //     ROS_INFO_STREAM(marvin_odom->pose.pose.position.x<<" "<<roberto_odom->pose.pose.position.x);            
+  //   }
+  //   roberto_client->cancelGoal();
+    // Door nearZone = getNearestSafeZone(roberto_odom);
+    // goToSafeZone("roberto",nearZone);
+    // ros::spinOnce();
+  // }
 }
 
 void Visit_Door::run() 
 {
   std::vector<string> doors;
 
-  doors.push_back("d3_414b1");
+  // doors.push_back("ia_1");
+  doors.push_back("d3_414b1");  
   doors.push_back("d3_414b2");
-  doors.push_back("d3_414a1");
   doors.push_back("d3_414a2");
-     
+  doors.push_back("d3_414a1");      
   
   int marvin_door = 0;
   int roberto_door = (int)doors.size()-1;
 
-  // Client marvin_client("marvin/action_executor/execute_plan", true);
   marvin_client->waitForServer();
-  
-  // Client roberto_client("roberto/action_executor/execute_plan", true);
   roberto_client->waitForServer();
 
   string marvin_location = doors.at(marvin_door);
@@ -175,12 +387,12 @@ void Visit_Door::run()
   message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
   TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
   sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
-  
   while(ros::ok()) {
     // message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
     // message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
     // TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
     // sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
+    robot_distances.clear();
     if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
       marvin_location = doors.at(marvin_door);
       marvin_door += 1;

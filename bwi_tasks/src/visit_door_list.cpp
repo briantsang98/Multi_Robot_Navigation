@@ -24,7 +24,9 @@ int main(int argc, char**argv) {
   
   std::vector<string> doors;
   
-  doors.push_back("d3_414b1");
+  // doors.push_back("o3_724");
+  // doors.push_back("d3_414b1");
+  doors.push_back("ia_1");
   doors.push_back("d3_414b2");
   doors.push_back("d3_414a1");
   doors.push_back("d3_414a2");

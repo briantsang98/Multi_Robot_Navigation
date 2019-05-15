@@ -2,7 +2,7 @@
 
 #include <sstream>
 #include <cstdlib> //for atoi
-
+#include <iostream>
 using namespace std;
 
 namespace actasp {
@@ -21,7 +21,6 @@ AspFluent::AspFluent(const std::string& formula) throw (std::invalid_argument) :
    size_t first_par = formula.find_first_of('(');
    size_t last_par = formula.find_last_of(')');
    size_t last_comma = formula.find_last_of(',');
-   
    if(first_par == string::npos)
     throw std::invalid_argument("AspFluent: The string " + formula + " does not contain a '(', therefore is not a valid fluent");
    
