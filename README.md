@@ -1,10 +1,8 @@
-# BWI_Multi_Robot
-RUN commands
+# RUN commands
+- roslaunch bwi_launch multi_robot_simulation.launch
+- rosrun bwi_tasks multi_robot_navigation 
 
-roslaunch bwi_launch multi_robot_simulation.launch
-rosrun bwi_tasks multi_robot_navigation 
-
-Main files:
+# Main files
 bwi_common/bwi_tasks/src/multi_robot_navigation.cpp
 bwi_common/utexas_gdc/maps/simulation/multimap2/3ne/objects.yaml
 
