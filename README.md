@@ -22,6 +22,7 @@
 	(If a parking zone lies inside the circle having ip as center and radius=2 grid cells, then interaction happens in safe zone)
 	* Robots moving towards each other
 - If collision detected
+
 	**Determine parking zone closest to the interaction point (getNearestParkingZone)
 		Parking zones defined in objects.yaml file (p3_)
 		
