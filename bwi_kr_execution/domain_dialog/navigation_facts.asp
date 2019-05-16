@@ -87,13 +87,6 @@ door(d3_516b).
 door(d3_ele_l).
 door(d3_ele_s).
 
-door(ia_1).
-door(ia_2).
-door(ia_3).
-door(ia_4).
-door(ia_5).
-door(ia_6).
-door(ia_7).
 
 % hasdoor(l3_ele1, d3_ele1).
 % hasdoor(l3_200, d3_ele1).

@@ -603,8 +603,5 @@ inside(o3_514_tablea, l3_514).
 object(o3_514_tableb).
 inside(o3_514_tableb, l3_514). 
 
-object(ia_1).
-inside(ia_1, l3_514). 
-
 badDoor(d3_414a3).
 badDoor(d3_414b3).
