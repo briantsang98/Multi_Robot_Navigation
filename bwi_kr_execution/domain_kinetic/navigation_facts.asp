@@ -561,6 +561,27 @@ inside(o3_302_couch,l3_302).
 object(o3_302_printer).
 inside(o3_302_printer,l3_302).
 
+object(p3_18).
+
+object(p3_19).
+
+object(p3_15).
+
+object(p3_16).
+
+object(p3_17).
+
+object(p3_20).
+
+object(p3_21).
+
+object(p3_22).
+
+object(p3_44).
+
+object(p3_45).
+
+object(r3_16).
 
 object(o3_828).
 inside(o3_828,l3_828).

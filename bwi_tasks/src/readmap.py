@@ -41,7 +41,8 @@ def slidingWindow(data):
                         # print(list)
 def main():    
         try:
-            data_folder = os.path.join("/home/users/NI2452/catkin_ws/src/","bwi_common/utexas_gdc/maps/simulation/3ne")
+            #data_folder = os.path.join("/home/users/NI2452/catkin_ws/src/","bwi_common/utexas_gdc/maps/simulation/3ne")
+            data_folder = os.path.join("/home/brian/catkin_ws/src/","bwi_common/utexas_gdc/maps/simulation/3ne")
             yaml_file = os.path.join(data_folder, "doors_map.yaml")
         except KeyError:
             rospy.logfatal("map needs to be set to use the logical marker")

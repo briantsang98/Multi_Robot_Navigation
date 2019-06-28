@@ -235,6 +235,7 @@ acc(l2_400, l2_500).
 acc(l2_100, l2_600).
 acc(l2_702, l2_700).
 
+
 dooracc(R1,D,R2) :- hasdoor(R1,D), hasdoor(R2,D), R1 != R2, door(D), room(R1), room(R2).
 dooracc(R1,D,R2) :- dooracc(R2,D,R1).
 
