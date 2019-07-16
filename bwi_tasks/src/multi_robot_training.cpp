@@ -103,9 +103,16 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   marvin_relocalize = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/marvin/initialpose",100,true);
   marvin_fixed_frame = "marvin/level_mux_map";
   roberto_fixed_frame = "roberto/level_mux_map";
+  while(!marvin_ac.waitForServer(ros::Duration(5.0))){
+    ROS_INFO("Waiting for the move_base action server to come up");
+  }
+  while(!roberto_ac.waitForServer(ros::Duration(5.0))){
+    ROS_INFO("Waiting for the move_base action server to come up");
+  }
   episodes = runs;
-  for(int i = 0; i<episodes;i++){
+  for(int i = 0; i<runs;i++){
   	run();
+  	episodes--;
   }
 }
 
@@ -194,29 +201,6 @@ void Pass_Hallway::reset_positions(){
   marvin_pose.pose.covariance[6*5+5] = M_PI/12.0 * M_PI/12.0;
   marvin_relocalize.publish(marvin_pose);
 
-  string marvin_start_pos = "s3_1";
-  string roberto_start_pos = "s3_2";
-  plan_execution::ExecutePlanGoal marvin_goal;
-  plan_execution::ExecutePlanGoal roberto_goal;
-
-  plan_execution::AspRule marvin_rule;
-  plan_execution::AspFluent marvin_fluent;
-  marvin_fluent.name = "not facing";
-
-  plan_execution::AspRule roberto_rule;
-  plan_execution::AspFluent roberto_fluent;
-  roberto_fluent.name = "not facing";
-
-  ROS_INFO_STREAM("MARVIN going to " << marvin_start_pos);
-  ROS_INFO_STREAM("ROBERTO going to " << roberto_start_pos);
-  marvin_fluent.variables.push_back(marvin_start_pos);
-  roberto_fluent.variables.push_back(roberto_start_pos);
-
-  marvin_rule.body.push_back(marvin_fluent);
-  marvin_goal.aspGoal.push_back(marvin_rule);
-
-  roberto_rule.body.push_back(roberto_fluent);
-  roberto_goal.aspGoal.push_back(roberto_rule);
   roberto_center = false;
   marvin_center = false;
   
@@ -228,9 +212,6 @@ void Pass_Hallway::reset_positions(){
   resetRoberto.waitForExistence();
   std_srvs::Empty empty2;
   resetRoberto.call(empty2);
-  
-  //marvin_client->sendGoalAndWait(marvin_goal);
-  //roberto_client->sendGoalAndWait(roberto_goal);
 }
 
 void Pass_Hallway::stopRobot(Client *client){
@@ -258,11 +239,11 @@ bool Pass_Hallway::collision(const Point &roberto_odom, const Point &marvin_odom
   }
   if(robotsClose){
   	ROS_INFO("close");
-  	if(((float)clock()-closeStartTime)/CLOCKS_PER_SEC > 5){
+  	if(((float)clock()-closeStartTime)/CLOCKS_PER_SEC > 4){
   		return true;
   	}
   }
-  if(roberto_odom.x - marvin_odom.x < -2){
+  if(roberto_odom.x - marvin_odom.x < -1){
   	successfulPass = true;
   	return true;
   }
@@ -287,8 +268,7 @@ bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom
 void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom)
 { 
   ROS_INFO("in callback");
-  if(collision(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position) 
-  	|| backwards(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
+  if(collision(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
   	ROS_INFO("stopin");
   	stopRobot(marvin_client);
   	stopRobot(roberto_client);
@@ -308,8 +288,14 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   marv_goal.target_pose.header.stamp = ros::Time::now();
 
   //marv_goal.target_pose.pose.position.z = 0;
-  marv_goal.target_pose.pose.position.x = 18.4;
-  marv_goal.target_pose.pose.position.y = 6.7;
+  if(episodes > 2){
+  	marv_goal.target_pose.pose.position.x = 18.4;//marvin_odom->pose.pose.position.x + 1;
+  	marv_goal.target_pose.pose.position.y = 6.7;
+  }else{
+  	marv_goal.target_pose.pose.position.x = marvin_odom->pose.pose.position.x + 1;
+    marv_goal.target_pose.pose.position.y = 8.1;
+  }
+  
   //marv_goal.target_pose.pose.orientation = marvin_odom->pose.pose.orientation;
   marv_goal.target_pose.pose.orientation.w = 1.0;
 
@@ -317,7 +303,7 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   rob_goal.target_pose.header.stamp = ros::Time::now();
 
   //rob_goal.target_pose.pose.position.z = 0;
-  rob_goal.target_pose.pose.position.x = roberto_odom->pose.pose.position.x - 1;
+  rob_goal.target_pose.pose.position.x = roberto_odom->pose.pose.position.x - 2;
   rob_goal.target_pose.pose.position.y = 8.1;
   //rob_goal.target_pose.pose.orientation = roberto_odom->pose.pose.orientation;
   tf::Quaternion roberto_quat;
@@ -386,23 +372,16 @@ void Pass_Hallway::run()
 
   //marvin_client->sendGoal(marvin_goal);
   //roberto_client->sendGoal(roberto_goal);
-  //goToZone("e3_1",marvin_client);
   ROS_INFO("in run");
   message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
   message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
   TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(roberto_odom, marvin_odom, 10);
-  while(!marvin_ac.waitForServer(ros::Duration(5.0))){
-    ROS_INFO("Waiting for the move_base action server to come up");
-  }
-  while(!roberto_ac.waitForServer(ros::Duration(5.0))){
-    ROS_INFO("Waiting for the move_base action server to come up");
-  }
   
   sync.registerCallback(boost::bind(&Pass_Hallway::callback, this, _1, _2));
-  ros::Rate r(20);
+  //ros::Rate r(20);
   while(ros::ok() && !reset){
   	ros::spinOnce();
-  	r.sleep();
+  	//r.sleep();
   }
   return;
 }
@@ -414,7 +393,7 @@ int main(int argc, char**argv) {
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   
-  Pass_Hallway pass_hallway(&nh,1000);
+  Pass_Hallway pass_hallway(&nh,3);
   
   /*for(int i = 0; i<1000;i++){
   	pass_hallway.run();

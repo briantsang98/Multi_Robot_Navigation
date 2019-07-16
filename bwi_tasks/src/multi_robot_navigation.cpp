@@ -46,7 +46,7 @@ public:
   bool safeInteraction(const Point &pt, const Point &roberto_odom, const Point &marvin_odom);
   vector<geometry_msgs::Point> getInteractionPoints(const Point &start_pt, const Point &goal_pt);
   geometry_msgs::Point getIteractionPoint(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom);  
-  bool checkRobotsDirection(vector<int> &distances);
+  bool checkRobotsMovingCloser(vector<int> &distances);
   bool checkRobotsMovingAway(vector<int> &distances);
   void stopRobot(Client *client);
   void resumeRobot(Client *client, int door);
@@ -205,6 +205,7 @@ string Visit_Door::getNearestParkingZone(const geometry_msgs::Point &ip) {
 }
 
 void Visit_Door::stopRobot(Client *client){
+  //stop robot by canceling goal
   ros::Publisher pub1;
   actionlib_msgs::GoalID msg;
   msg.id = ""; 
@@ -217,6 +218,7 @@ void Visit_Door::stopRobot(Client *client){
 }
 
 void Visit_Door::resumeRobot(Client *client, int door){
+  //resume robot by giving goal of saved door number
   plan_execution::ExecutePlanGoal goal;
   plan_execution::AspRule rule;
   plan_execution::AspFluent fluent;
@@ -276,7 +278,7 @@ void Visit_Door::goToParkingZone(string ParkingZone, Client *client, bool &inter
 
   rule.body.push_back(fluent);
   goal.aspGoal.push_back(rule);
-  client->sendGoal(goal);
+  client->sendGoalAndWait(goal);
   if (client->getState() == actionlib::SimpleClientGoalState::ABORTED) {
     ROS_INFO("Aborted");
   }
@@ -307,7 +309,7 @@ bool Visit_Door::checkForInterruption(const Odometry::ConstPtr &robot1_odom, con
   }
   return false;
 }
-bool Visit_Door::checkRobotsDirection(vector<int> &distances){
+bool Visit_Door::checkRobotsMovingCloser(vector<int> &distances){
   //increasing distance - robots moving away
   int size = distances.size();
   int i = size-35 > 0 ? size-35: 0; // check the latest 10 distances only
@@ -317,7 +319,7 @@ bool Visit_Door::checkRobotsDirection(vector<int> &distances){
   for( ; i<size-1 ; i++) {
     ROS_INFO_STREAM(distances[i]<<" ");
     myfile<<distances[i]<<" ";
-    if(distances[i]>distances[i+1] && distances[i]- distances[i+1] < 3 && distances[i] < 15) {
+    if(distances[i]>distances[i+1] && distances[i]- distances[i+1] < 3 && distances[i] < 12) {
       //to avoid errors, we check if atleast two values are contradicting
       count++;
       if(distances[i]>max && count == 1){
@@ -412,7 +414,7 @@ bool Visit_Door::safeInteraction(const Point &ip, const Point &roberto_odom, con
   }
 
   //2 - Robots are moving away from each other
-  if(checkRobotsDirection(robot_distances)){
+  if(checkRobotsMovingCloser(robot_distances)){
     //false - moving towards each other
     //true - moving away from each other
     ROS_INFO_STREAM("robots moving away from each other");
@@ -585,65 +587,12 @@ void Visit_Door::run()
 
   marvin_client->waitForServer();
   roberto_client->waitForServer();
-  ros::ServiceClient robot_teleporter_client = 
-            nh_->serviceClient<bwi_msgs::RobotTeleporterInterface>("roberto/teleport_robot");
-  robot_teleporter_client.waitForExistence();
-  bwi_msgs::RobotTeleporterInterface rti;
-  geometry_msgs::Pose tele;
-  tele.position.x = 2.55;
-  tele.position.y = 16.55;
-  tele.position.z = 0;
-  tf::Quaternion quat;
-  quat.setRPY(0.0, 0.0, 1.5707963267948966);
-  tf::quaternionTFToMsg(quat, tele.orientation);
-  /*tele.orientation.x = 0;
-  tele.orientation.y = 0;
-  tele.orientation.z = 0;
-  tele.orientation.w = 1;*/
 
-  rti.request.pose = tele;
-  if (robot_teleporter_client.call(rti) && rti.response.success) {
-    ROS_INFO("yes");
-  } else {
-    ROS_ERROR_STREAM("Failed robot teleportation to pose " << rti.request.pose);
-  }
-  std::string fixed_frame = "roberto/level_mux_map";
-  geometry_msgs::PoseWithCovarianceStamped pose;
-  pose.header.frame_id = fixed_frame;
-  pose.header.stamp = ros::Time::now();
-  pose.pose.pose.position.x = 2.55;
-  pose.pose.pose.position.y = 16.55;
-  pose.pose.pose.position.z = 0;
-  pose.pose.covariance[6*0+0] = 0.5 * 0.5;
-  pose.pose.covariance[6*1+1] = 0.5 * 0.5;
-  pose.pose.covariance[6*5+5] = M_PI/12.0 * M_PI/12.0;
-  // set theta
-  
-  tf::quaternionTFToMsg(quat, pose.pose.pose.orientation);
-
-  ros::Publisher newPos = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/roberto/initialpose",100,true);
-  ros::Duration(1).sleep();
-  newPos.publish(pose);
-  
-  /*ros::ServiceClient robot_clear_client = 
-            nh_->serviceClient<std_srvs::Empty>("roberto/move_base/clear_costmaps");
-  robot_clear_client.waitForExistence();
-  std_srvs::Empty empty;
-  robot_clear_client.call(empty);*/
-  plan_execution::ExecutePlanGoal goal;
-  plan_execution::AspRule rule;
-  plan_execution::AspFluent fluent;
-  fluent.name = "not facing";
-  fluent.variables.push_back("p3_45");
-  rule.body.push_back(fluent);
-  goal.aspGoal.push_back(rule);
-  roberto_client->sendGoalAndWait(goal);
   //ros::Duration(2).sleep();
   
-  goToParkingZone("d3_414a1",roberto_client,interrupt_flag);
-  //roberto_client->stopTrackingGoal();
-  //resumeRobot(roberto_client,marvin_door);
-/*
+  //goToParkingZone("d3_414a1",roberto_client,interrupt_flag);
+
+
   string marvin_location = doors.at(marvin_door);
   string roberto_location = doors.at(roberto_door);
 
@@ -677,7 +626,7 @@ void Visit_Door::run()
   sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
   
   ros::spin();
-    */
+    
   return;
 }
 
