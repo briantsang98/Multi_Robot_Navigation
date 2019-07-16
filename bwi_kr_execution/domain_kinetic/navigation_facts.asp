@@ -583,6 +583,18 @@ object(p3_45).
 
 object(r3_16).
 
+object(s3_1).
+
+object(s3_2).
+
+object(e3_1).
+
+object(e3_2).
+
+object(e3_3).
+
+object(e3_4).
+
 object(o3_828).
 inside(o3_828,l3_828).
 

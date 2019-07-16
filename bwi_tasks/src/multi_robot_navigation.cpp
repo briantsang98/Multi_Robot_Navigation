@@ -8,6 +8,9 @@
 #include <bwi_planning_common/interactions.h>
 
 #include <ros/ros.h>
+#include <bwi_msgs/RobotTeleporterInterface.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <tf/transform_listener.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
 #include <move_base_msgs/MoveBaseAction.h>
@@ -20,6 +23,7 @@
 #include <time.h>
 #include <iostream>
 #include <fstream>
+#include <std_srvs/Empty.h>
 
 using namespace std;
 using namespace geometry_msgs;
@@ -123,17 +127,11 @@ std::vector<geometry_msgs::Point> Visit_Door::getInteractionPoints(const geometr
   start.pose.position.x = start_pt.x;
   start.pose.position.y = start_pt.y;
   start.pose.position.z = 0;
-  start.pose.orientation.x = 1.0;
-  start.pose.orientation.y = 1.0;
-  start.pose.orientation.z = 1.0;
   start.pose.orientation.w = 1.0;
 
   goal.pose.position.x = goal_pt.x;
   goal.pose.position.y = goal_pt.y;
   goal.pose.position.z = 0;
-  goal.pose.orientation.x= 1.0;
-  goal.pose.orientation.y= 1.0;
-  goal.pose.orientation.z= 1.0;
   goal.pose.orientation.w= 1.0;
   srv.request.tolerance = 0.5 + 1e-6;
 
@@ -242,7 +240,7 @@ void Visit_Door::resumeRobot(Client *client, int door){
     client->sendGoalAndWait(tempGoal);
     ROS_INFO_STREAM("Going to temp loc: " << tempLocation);
   }
-  ROS_INFO("SavedDoor: %d, door: %d",savedGoal,door);
+  //ROS_INFO("SavedDoor: %d, door: %d",savedGoal,door);
   if(client == marvin_client){
     ROS_INFO_STREAM("Marvin going to " << doors.at(door));
     myfile << "Marvin going to " << doors.at(door) << "\n";
@@ -278,7 +276,7 @@ void Visit_Door::goToParkingZone(string ParkingZone, Client *client, bool &inter
 
   rule.body.push_back(fluent);
   goal.aspGoal.push_back(rule);
-  client->sendGoalAndWait(goal);
+  client->sendGoal(goal);
   if (client->getState() == actionlib::SimpleClientGoalState::ABORTED) {
     ROS_INFO("Aborted");
   }
@@ -311,7 +309,6 @@ bool Visit_Door::checkForInterruption(const Odometry::ConstPtr &robot1_odom, con
 }
 bool Visit_Door::checkRobotsDirection(vector<int> &distances){
   //increasing distance - robots moving away
-  ROS_INFO("inside CRD");
   int size = distances.size();
   int i = size-35 > 0 ? size-35: 0; // check the latest 10 distances only
   int count = 0;
@@ -320,7 +317,7 @@ bool Visit_Door::checkRobotsDirection(vector<int> &distances){
   for( ; i<size-1 ; i++) {
     ROS_INFO_STREAM(distances[i]<<" ");
     myfile<<distances[i]<<" ";
-    if(distances[i]>distances[i+1] && distances[i]- distances[i+1] < 3 && distances[i] < 20) {
+    if(distances[i]>distances[i+1] && distances[i]- distances[i+1] < 3 && distances[i] < 15) {
       //to avoid errors, we check if atleast two values are contradicting
       count++;
       if(distances[i]>max && count == 1){
@@ -328,8 +325,6 @@ bool Visit_Door::checkRobotsDirection(vector<int> &distances){
       }
       else if(count==3 && (max-distances[i+1])>2)
         return false;
-        myfile<<distances[i+1]<<"\n";
-        //break;
     }
   }
   myfile<<"\n";
@@ -338,13 +333,12 @@ bool Visit_Door::checkRobotsDirection(vector<int> &distances){
 
 bool Visit_Door::checkRobotsMovingAway(vector<int> &distances){
   //increasing distance - robots moving away
-  ROS_INFO("inside away");
-  int size = distances.size();
-  int i = size-35 > 0 ? size-35: 0; // check the latest 10 distances only
+  //int size = distances.size();
+  //int i = size-35 > 0 ? size-35: 0; // check the latest 10 distances only
   int count = 0;
   float min;
   float max;
-  for( ; i<size-1 ; i++) {
+  /*for( ; i<size-1 ; i++) {
     //ROS_INFO_STREAM(distances[i]<<" ");
     if(distances[i]<distances[i+1] && distances[i+1] - distances[i] < 3) {
       //to avoid errors, we check if atleast two values are contradicting
@@ -355,12 +349,12 @@ bool Visit_Door::checkRobotsMovingAway(vector<int> &distances){
       else if(count==3 && (distances[i+1]-min) > 2)
         return true;
     }
-  }
+  }*/
 
   //odometry usage to check if robots are moving away, need to be within 8 to work
   int odom_size = robot_odom_distances.size();
   
-  i = odom_size - 15 > 0 ? odom_size-15: 0;
+  int i = odom_size - 15 > 0 ? odom_size-15: 0;
   count = 0;
   min = 1000;
   max = 0;
@@ -373,7 +367,7 @@ bool Visit_Door::checkRobotsMovingAway(vector<int> &distances){
       if(count == 1){
         min = robot_odom_distances[i];
       }
-      if(count>3 && (robot_odom_distances[i+1]-min) > 1){
+      if(count>3 && (robot_odom_distances[i+1]-min) > 0.5){
         myfile<<robot_odom_distances[i+1]<<" ";
         return true;
       }
@@ -391,7 +385,7 @@ bool Visit_Door::safeInteraction(const Point &ip, const Point &roberto_odom, con
   int distance = getInteractionPoints(roberto_odom, marvin_odom).size();
 
   float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
-  if(odom_distance>0.1 && odom_distance < 5){
+  if(odom_distance>0.1 && odom_distance < 3){
     robot_odom_distances.push_back(odom_distance);
   }
   robot_distances.push_back(distance);
@@ -462,7 +456,7 @@ void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry
     
     roberto_door -= 1;
 
-    if(roberto_door <= 0){
+    if(roberto_door < 0){
       roberto_door = (int)doors.size()-1;
     }
     string roberto_location = doors.at(roberto_door);
@@ -477,7 +471,7 @@ void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry
     ROS_INFO("sending goal");
     roberto_client->sendGoal(roberto_goal);
   }
-  //get interaction point, avg with the previous 10 points for stability
+
   Point ip = getIteractionPoint(roberto_odom, marvin_odom);
 
   /*if(latestIP.size() == 10){
@@ -501,7 +495,6 @@ void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry
   if(roberto_parked || marvin_parked){
     if(checkRobotsMovingAway(robot_distances)){
       ROS_INFO("resume parked robot");
-      robot_odom_distances.clear();
       myfile << "resume parked robot";
       resumeRobot(parkedRobot,savedGoal);
       roberto_parked = false;
@@ -513,6 +506,10 @@ void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry
     //ROS_INFO_STREAM("Safe interaction");
 
     string nearZone = getNearestParkingZone(ip);
+    //if can't find nearest zone to interaction point, get nearest zone to Marvin
+    if(nearZone.compare("empty") == 0){
+      nearZone = getNearestParkingZone(marvin_odom->pose.pose.position);
+    }
     Point nearZone_pt;
     nearZone_pt.x = ParkingZones[nearZone].position.x;// (nearZone.door_corners[0].x + nearZone.door_corners[1].x)/2;
     nearZone_pt.y = ParkingZones[nearZone].position.y;//(nearZone.door_corners[0].y + nearZone.door_corners[1].y)/2;
@@ -532,6 +529,7 @@ void Visit_Door::callback(const Odometry::ConstPtr &roberto_odom, const Odometry
     ROS_INFO_STREAM("roberto dis:"<<roberto_zone_dist<<" Marvin dis:"<<marvin_zone_dist);
     myfile << "roberto dis:"<<roberto_zone_dist<<" Marvin dis:"<<marvin_zone_dist << "\n";
     robot_distances.clear();
+    robot_odom_distances.clear();
     //roberto closer to parking zone
     if(roberto_zone_dist < marvin_zone_dist) {      
       // clock_t initialTime = clock();
@@ -587,10 +585,65 @@ void Visit_Door::run()
 
   marvin_client->waitForServer();
   roberto_client->waitForServer();
-  goToParkingZone("p3_17",roberto_client,interrupt_flag);
+  ros::ServiceClient robot_teleporter_client = 
+            nh_->serviceClient<bwi_msgs::RobotTeleporterInterface>("roberto/teleport_robot");
+  robot_teleporter_client.waitForExistence();
+  bwi_msgs::RobotTeleporterInterface rti;
+  geometry_msgs::Pose tele;
+  tele.position.x = 2.55;
+  tele.position.y = 16.55;
+  tele.position.z = 0;
+  tf::Quaternion quat;
+  quat.setRPY(0.0, 0.0, 1.5707963267948966);
+  tf::quaternionTFToMsg(quat, tele.orientation);
+  /*tele.orientation.x = 0;
+  tele.orientation.y = 0;
+  tele.orientation.z = 0;
+  tele.orientation.w = 1;*/
 
+  rti.request.pose = tele;
+  if (robot_teleporter_client.call(rti) && rti.response.success) {
+    ROS_INFO("yes");
+  } else {
+    ROS_ERROR_STREAM("Failed robot teleportation to pose " << rti.request.pose);
+  }
+  std::string fixed_frame = "roberto/level_mux_map";
+  geometry_msgs::PoseWithCovarianceStamped pose;
+  pose.header.frame_id = fixed_frame;
+  pose.header.stamp = ros::Time::now();
+  pose.pose.pose.position.x = 2.55;
+  pose.pose.pose.position.y = 16.55;
+  pose.pose.pose.position.z = 0;
+  pose.pose.covariance[6*0+0] = 0.5 * 0.5;
+  pose.pose.covariance[6*1+1] = 0.5 * 0.5;
+  pose.pose.covariance[6*5+5] = M_PI/12.0 * M_PI/12.0;
+  // set theta
+  
+  tf::quaternionTFToMsg(quat, pose.pose.pose.orientation);
+
+  ros::Publisher newPos = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/roberto/initialpose",100,true);
+  ros::Duration(1).sleep();
+  newPos.publish(pose);
+  
+  /*ros::ServiceClient robot_clear_client = 
+            nh_->serviceClient<std_srvs::Empty>("roberto/move_base/clear_costmaps");
+  robot_clear_client.waitForExistence();
+  std_srvs::Empty empty;
+  robot_clear_client.call(empty);*/
+  plan_execution::ExecutePlanGoal goal;
+  plan_execution::AspRule rule;
+  plan_execution::AspFluent fluent;
+  fluent.name = "not facing";
+  fluent.variables.push_back("p3_45");
+  rule.body.push_back(fluent);
+  goal.aspGoal.push_back(rule);
+  roberto_client->sendGoalAndWait(goal);
+  //ros::Duration(2).sleep();
+  
+  goToParkingZone("d3_414a1",roberto_client,interrupt_flag);
+  //roberto_client->stopTrackingGoal();
   //resumeRobot(roberto_client,marvin_door);
-
+/*
   string marvin_location = doors.at(marvin_door);
   string roberto_location = doors.at(roberto_door);
 
@@ -624,61 +677,7 @@ void Visit_Door::run()
   sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
   
   ros::spin();
-  while(ros::ok()) {
-    // message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
-    // message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
-    // TimeSynchronizer<nav_msgs::Odometry, nav_msgs::Odometry> sync(marvin_odom, roberto_odom, 10);
-    // sync.registerCallback(boost::bind(&Visit_Door::callback, this, _1, _2));
-    robot_distances.clear();
-    if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
-      marvin_location = doors.at(marvin_door);
-      marvin_door += 1;
-      if(marvin_door >= (int)doors.size()){
-        marvin_door = 0;
-      }
-
-      ROS_INFO_STREAM("MARVIN going to " << marvin_location);
-      plan_execution::ExecutePlanGoal marvin_goal;
-
-      plan_execution::AspRule marvin_rule;
-      plan_execution::AspFluent marvin_fluent;
-      marvin_fluent.name = "not facing";
-
-      marvin_fluent.variables.push_back(marvin_location);
-
-      marvin_rule.body.push_back(marvin_fluent);
-      marvin_goal.aspGoal.push_back(marvin_rule);
-
-
-      ROS_INFO("sending goal");
-      marvin_client->sendGoal(marvin_goal);
-    }
-    if(roberto_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
-      roberto_location = doors.at(roberto_door);
-      roberto_door -= 1;
-
-      if(roberto_door <= 0){
-        roberto_door = (int)doors.size()-1;
-      }
-
-      ROS_INFO_STREAM("ROBERTO going to " << roberto_location);
-      plan_execution::ExecutePlanGoal roberto_goal;
-
-      plan_execution::AspRule roberto_rule;
-      plan_execution::AspFluent roberto_fluent;
-      roberto_fluent.name = "not facing";
-
-      roberto_fluent.variables.push_back(roberto_location);
-
-      roberto_rule.body.push_back(roberto_fluent);
-      roberto_goal.aspGoal.push_back(roberto_rule);
-      
-      ROS_INFO("sending goal");
-      roberto_client->sendGoal(roberto_goal);
-    }
-
-  }
-  
+    */
   return;
 }
 

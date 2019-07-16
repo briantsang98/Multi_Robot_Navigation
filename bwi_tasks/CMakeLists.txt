@@ -69,6 +69,10 @@ add_executable(multi_robot_navigation src/multi_robot_navigation.cpp)
 add_dependencies(multi_robot_navigation ${catkin_EXPORTED_TARGETS})
 target_link_libraries(multi_robot_navigation ${catkin_LIBRARIES})
 
+add_executable(multi_robot_training src/multi_robot_training.cpp)
+add_dependencies(multi_robot_training ${catkin_EXPORTED_TARGETS})
+target_link_libraries(multi_robot_training ${catkin_LIBRARIES})
+
 add_executable(mt_node src/mt_node.cpp)
 add_dependencies(mt_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(mt_node ${catkin_LIBRARIES})
