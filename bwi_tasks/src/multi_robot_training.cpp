@@ -42,8 +42,8 @@ public:
 	void stopRobot(Client *client);
 	void reset_positions();
 	bool collision(const Point &roberto_odom, const Point &marvin_odom);
-	void goToZone(string ParkingZone, Client *client);
 	bool backwards(const Point &roberto_odom, const Point &marvin_odom);
+	void get_waypoint();
   
 protected: 
 	MoveBaseClient marvin_ac;
@@ -60,14 +60,14 @@ protected:
     ros::Publisher stop_roberto;
     ros::Publisher stop_marvin;
     ofstream myfile;
-    string parkedLocation;
     std::vector<float> robot_odom_distances;
     ros::ServiceClient marvin_teleporter_client;
     ros::ServiceClient roberto_teleporter_client;
+    ros::ServiceClient resetMarvin;
+    ros::ServiceClient resetRoberto;
     ros::Publisher roberto_relocalize;
     ros::Publisher marvin_relocalize;
     std::vector<float> times;
-    int episodes;
     bool robotsClose;
     bool reset;
     float episodeStartTime;
@@ -75,15 +75,28 @@ protected:
     bool roberto_center;
     bool marvin_center;
     bool successfulPass;
+
+    float x_hallway_min = 16.0;
+    float x_hallway_max = 24.0;
+    float y_hallway_min = 6.5;
+    float y_hallway_max = 9.25;
+
+    //std::vector<float> thetas([0.0, 3.141/2.0, 3.141, 3.0*3.141/2.0])
+
+    geometry_msgs::Pose waypoint;
+    //std::vector<float> phi(17);
+    float reward;
+
+
 };
 
 Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/move_base"),roberto_ac("roberto/move_base")
 {
   nh_ = nh;
-  marvin_client = new Client("/marvin/action_executor/execute_plan", true);
+  /*marvin_client = new Client("/marvin/action_executor/execute_plan", true);
   roberto_client = new Client("/roberto/action_executor/execute_plan", true);
   marvin_client->waitForServer();
-  roberto_client->waitForServer();
+  roberto_client->waitForServer();*/
   myfile.open("testfile.txt");
   if(myfile.is_open()){
     myfile<<"hi\n";
@@ -99,6 +112,10 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   roberto_teleporter_client.waitForExistence();
   marvin_teleporter_client = nh_->serviceClient<bwi_msgs::RobotTeleporterInterface>("marvin/teleport_robot");
   marvin_teleporter_client.waitForExistence();
+  resetMarvin = nh_ -> serviceClient<std_srvs::Empty>("marvin/move_base/clear_costmaps");
+  resetMarvin.waitForExistence();
+  resetRoberto = nh_ -> serviceClient<std_srvs::Empty>("roberto/move_base/clear_costmaps");
+  resetRoberto.waitForExistence();
   roberto_relocalize = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/roberto/initialpose",100,true);
   marvin_relocalize = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/marvin/initialpose",100,true);
   marvin_fixed_frame = "marvin/level_mux_map";
@@ -109,64 +126,42 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   while(!roberto_ac.waitForServer(ros::Duration(5.0))){
     ROS_INFO("Waiting for the move_base action server to come up");
   }
-  episodes = runs;
   for(int i = 0; i<runs;i++){
   	run();
-  	episodes--;
+  	// compute the reward
+  	// reward = something
+
+  	// append \phi, reward to running text file
   }
 }
 
 
-void Pass_Hallway::goToZone(string ParkingZone, Client *client){
-  plan_execution::ExecutePlanGoal goal;
-  plan_execution::AspRule rule;
-  plan_execution::AspFluent fluent;
-  fluent.name = "not facing";
-  Client* otherClient;
-  if(client == marvin_client){
-    ROS_INFO_STREAM("Marvin "<<" going to " << ParkingZone);
-    myfile << "Marvin "<<" going to " << ParkingZone << "\n";
-    otherClient = roberto_client;
-  }else if(client == roberto_client){
-    ROS_INFO_STREAM("Roberto "<<" going to " <<  ParkingZone);
-    myfile << "Roberto "<<" going to " << ParkingZone << "\n";
-    otherClient = marvin_client;
-  }
-  fluent.variables.push_back(ParkingZone);
-
-  rule.body.push_back(fluent);
-  goal.aspGoal.push_back(rule);
-  client->sendGoal(goal);
-  if (client->getState() == actionlib::SimpleClientGoalState::ABORTED) {
-    ROS_INFO("Aborted");
-  }
-  else if (client->getState() == actionlib::SimpleClientGoalState::PREEMPTED) {
-    ROS_INFO("Preempted");
-  }
-  
-  else if (client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED) {
-    ROS_INFO("Succeeded!");
-    stopRobot(client);
-    parkedLocation = ParkingZone;
-    ROS_INFO_STREAM("after success" << parkedLocation);
-  }
-  else
-     ROS_INFO("Terminated");  
-}
 
 void Pass_Hallway::reset_positions(){
 
-
   bwi_msgs::RobotTeleporterInterface roberto_rti;
   geometry_msgs::Pose roberto_start;
-  roberto_start.position.x = 25;
-  roberto_start.position.y = 8;
+  roberto_start.position.x = 24;
+  roberto_start.position.y = 8.1;//8.45;
   roberto_start.position.z = 0;
   tf::Quaternion roberto_quat;
-  roberto_quat.setRPY(0.0, 0.0, 3.14159);
+  roberto_quat.setRPY(0.0, 0.0, 3.1416);
   tf::quaternionTFToMsg(roberto_quat, roberto_start.orientation);
   roberto_rti.request.pose = roberto_start;
   roberto_teleporter_client.call(roberto_rti);
+
+  bwi_msgs::RobotTeleporterInterface marvin_rti;
+  geometry_msgs::Pose marvin_start;
+  marvin_start.position.x = 16;
+  marvin_start.position.y = 8.1;//7.75;
+  marvin_start.position.z = 0;
+  tf::Quaternion marvin_quat;
+  marvin_quat.setRPY(0.0, 0.0, 0.0);
+  tf::quaternionTFToMsg(marvin_quat, marvin_start.orientation);
+  marvin_rti.request.pose = marvin_start;
+  marvin_teleporter_client.call(marvin_rti);
+  ros::Duration(0.1).sleep();
+
   geometry_msgs::PoseWithCovarianceStamped roberto_pose;
   roberto_pose.header.frame_id = roberto_fixed_frame;
   roberto_pose.header.stamp = ros::Time::now();
@@ -177,18 +172,11 @@ void Pass_Hallway::reset_positions(){
   roberto_pose.pose.covariance[6*0+0] = 0.5 * 0.5;
   roberto_pose.pose.covariance[6*1+1] = 0.5 * 0.5;
   roberto_pose.pose.covariance[6*5+5] = M_PI/12.0 * M_PI/12.0;
+  std_srvs::Empty empty2;
+  resetRoberto.call(empty2);
   roberto_relocalize.publish(roberto_pose);
 
-  bwi_msgs::RobotTeleporterInterface marvin_rti;
-  geometry_msgs::Pose marvin_start;
-  marvin_start.position.x = 17;
-  marvin_start.position.y = 8;
-  marvin_start.position.z = 0;
-  tf::Quaternion marvin_quat;
-  marvin_quat.setRPY(0.0, 0.0, 0.0);
-  tf::quaternionTFToMsg(marvin_quat, marvin_start.orientation);
-  marvin_rti.request.pose = marvin_start;
-  marvin_teleporter_client.call(marvin_rti);
+  
   geometry_msgs::PoseWithCovarianceStamped marvin_pose;
   marvin_pose.header.frame_id = marvin_fixed_frame;
   marvin_pose.header.stamp = ros::Time::now();
@@ -199,19 +187,12 @@ void Pass_Hallway::reset_positions(){
   marvin_pose.pose.covariance[6*0+0] = 0.5 * 0.5;
   marvin_pose.pose.covariance[6*1+1] = 0.5 * 0.5;
   marvin_pose.pose.covariance[6*5+5] = M_PI/12.0 * M_PI/12.0;
-  marvin_relocalize.publish(marvin_pose);
-
-  roberto_center = false;
-  marvin_center = false;
-  
-  ros::ServiceClient resetMarvin = nh_ -> serviceClient<std_srvs::Empty>("marvin/move_base/clear_costmaps");
-  resetMarvin.waitForExistence();
   std_srvs::Empty empty;
   resetMarvin.call(empty);
-  ros::ServiceClient resetRoberto = nh_ -> serviceClient<std_srvs::Empty>("roberto/move_base/clear_costmaps");
-  resetRoberto.waitForExistence();
-  std_srvs::Empty empty2;
-  resetRoberto.call(empty2);
+  marvin_relocalize.publish(marvin_pose);
+
+  /*roberto_center = false;
+  marvin_center = false;*/
 }
 
 void Pass_Hallway::stopRobot(Client *client){
@@ -229,6 +210,7 @@ void Pass_Hallway::stopRobot(Client *client){
 
 bool Pass_Hallway::collision(const Point &roberto_odom, const Point &marvin_odom){
   float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
+  ROS_INFO_STREAM(odom_distance);
   if(odom_distance>0.01 && odom_distance < 1.0){
   	if(!robotsClose){
   		robotsClose = true;
@@ -238,8 +220,7 @@ bool Pass_Hallway::collision(const Point &roberto_odom, const Point &marvin_odom
   	robotsClose = false;
   }
   if(robotsClose){
-  	ROS_INFO("close");
-  	if(((float)clock()-closeStartTime)/CLOCKS_PER_SEC > 4){
+  	if(((float)clock()-closeStartTime)/CLOCKS_PER_SEC > 5){
   		return true;
   	}
   }
@@ -269,9 +250,9 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
 { 
   ROS_INFO("in callback");
   if(collision(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
-  	ROS_INFO("stopin");
-  	stopRobot(marvin_client);
-  	stopRobot(roberto_client);
+  	ROS_INFO("stopping");
+  	//stopRobot(marvin_client);
+  	//stopRobot(roberto_client);
   	reset = true;
   	float timeUsed;
   	if(successfulPass){
@@ -288,22 +269,21 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   marv_goal.target_pose.header.stamp = ros::Time::now();
 
   //marv_goal.target_pose.pose.position.z = 0;
-  if(episodes > 2){
-  	marv_goal.target_pose.pose.position.x = 18.4;//marvin_odom->pose.pose.position.x + 1;
-  	marv_goal.target_pose.pose.position.y = 6.7;
-  }else{
-  	marv_goal.target_pose.pose.position.x = marvin_odom->pose.pose.position.x + 1;
-    marv_goal.target_pose.pose.position.y = 8.1;
-  }
+  marv_goal.target_pose.pose.position.x = 25;
+  marv_goal.target_pose.pose.position.y = 8.1;
+
   
   //marv_goal.target_pose.pose.orientation = marvin_odom->pose.pose.orientation;
-  marv_goal.target_pose.pose.orientation.w = 1.0;
+  tf::Quaternion marvin_quat;
+  marvin_quat.setRPY(0.0, 0.0, 0.0);
+  tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
+  
 
   rob_goal.target_pose.header.frame_id = "roberto/level_mux_map";
   rob_goal.target_pose.header.stamp = ros::Time::now();
 
   //rob_goal.target_pose.pose.position.z = 0;
-  rob_goal.target_pose.pose.position.x = roberto_odom->pose.pose.position.x - 2;
+  rob_goal.target_pose.pose.position.x = 15;
   rob_goal.target_pose.pose.position.y = 8.1;
   //rob_goal.target_pose.pose.orientation = roberto_odom->pose.pose.orientation;
   tf::Quaternion roberto_quat;
@@ -325,6 +305,19 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   }*/
 }
 
+void Pass_Hallway::get_waypoint()
+{
+	// generate random waypoint
+
+	// check feasibility with global planner
+
+	// generate corresponding \phi
+	//    \phi = [x, y, \theta, ]
+	// phi = something
+
+	// waypoint = something
+}
+
 void Pass_Hallway::run() 
 {
   
@@ -341,37 +334,17 @@ void Pass_Hallway::run()
   marvin_door = "e3_3";
   roberto_door = "e3_4";
   reset_positions();
-
+  //reset again to ensure proper localization
   reset_positions();
+
+  //calculate waypoints, phi
+  get_waypoint();
+
   reset = false;
   robotsClose = false;
   successfulPass = false;
   episodeStartTime = (float)clock();
 
-  plan_execution::ExecutePlanGoal marvin_goal;
-  plan_execution::ExecutePlanGoal roberto_goal;
-
-  plan_execution::AspRule marvin_rule;
-  plan_execution::AspFluent marvin_fluent;
-  marvin_fluent.name = "not facing";
-
-  plan_execution::AspRule roberto_rule;
-  plan_execution::AspFluent roberto_fluent;
-  roberto_fluent.name = "not facing";
-
-  ROS_INFO_STREAM("MARVIN going to " << marvin_door);
-  ROS_INFO_STREAM("ROBERTO going to " << roberto_door);
-  marvin_fluent.variables.push_back(marvin_door);
-  roberto_fluent.variables.push_back(roberto_door);
-
-  marvin_rule.body.push_back(marvin_fluent);
-  marvin_goal.aspGoal.push_back(marvin_rule);
-
-  roberto_rule.body.push_back(roberto_fluent);
-  roberto_goal.aspGoal.push_back(roberto_rule);
-
-  //marvin_client->sendGoal(marvin_goal);
-  //roberto_client->sendGoal(roberto_goal);
   ROS_INFO("in run");
   message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
   message_filters::Subscriber<nav_msgs::Odometry> roberto_odom(*nh_, "/roberto/odom", 1);
@@ -393,7 +366,7 @@ int main(int argc, char**argv) {
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   
-  Pass_Hallway pass_hallway(&nh,3);
+  Pass_Hallway pass_hallway(&nh,5);
   
   /*for(int i = 0; i<1000;i++){
   	pass_hallway.run();
