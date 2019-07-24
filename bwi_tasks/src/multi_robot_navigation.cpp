@@ -132,7 +132,7 @@ std::vector<geometry_msgs::Point> Visit_Door::getInteractionPoints(const geometr
   goal.pose.position.x = goal_pt.x;
   goal.pose.position.y = goal_pt.y;
   goal.pose.position.z = 0;
-  goal.pose.orientation.w= 1.0;
+  goal.pose.orientation.w = 1.0;
   srv.request.tolerance = 0.5 + 1e-6;
 
   interaction_points.push_back(start.pose.position);

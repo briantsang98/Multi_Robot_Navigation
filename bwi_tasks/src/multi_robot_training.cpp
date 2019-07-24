@@ -41,7 +41,7 @@ public:
 	bool checkRobotsMovingAway(vector<int> &distances);
 	void stopRobot(Client *client);
 	void reset_positions();
-	bool collision(const Point &roberto_odom, const Point &marvin_odom);
+	bool evaluateRobotDistance(const Point &roberto_odom, const Point &marvin_odom);
 	bool backwards(const Point &roberto_odom, const Point &marvin_odom);
 	void get_waypoint();
   
@@ -51,7 +51,7 @@ protected:
     ros::NodeHandle *nh_;
     Client *roberto_client; 
     Client *marvin_client; 
-	ros::ServiceClient make_plan_client_roberto;
+	//ros::ServiceClient make_plan_client_roberto;
     ros::ServiceClient make_plan_client_marvin;
     string marvin_door;
     string roberto_door;
@@ -67,27 +67,28 @@ protected:
     ros::ServiceClient resetRoberto;
     ros::Publisher roberto_relocalize;
     ros::Publisher marvin_relocalize;
-    std::vector<float> times;
     bool robotsClose;
     bool reset;
-    float episodeStartTime;
-    float closeStartTime;
+    double episodeStartTime;
+    double closeStartTime;
     bool roberto_center;
     bool marvin_center;
     bool successfulPass;
+    bool goalsReached;
+    bool collision;
+
 
     float x_hallway_min = 16.0;
     float x_hallway_max = 24.0;
     float y_hallway_min = 6.5;
     float y_hallway_max = 9.25;
-
+    float marvin_final_x = 25.0;
+    float marvin_final_y = 8.1;
+    float PI = 3.14159;
     //std::vector<float> thetas([0.0, 3.141/2.0, 3.141, 3.0*3.141/2.0])
 
     geometry_msgs::Pose waypoint;
     //std::vector<float> phi(17);
-    float reward;
-
-
 };
 
 Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/move_base"),roberto_ac("roberto/move_base")
@@ -104,6 +105,7 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
     ROS_INFO("not open");
     exit(1);
   }
+  
   stop_roberto = nh_->advertise<actionlib_msgs::GoalID> 
         ("/roberto/move_base/cancel", 1000, true); 
   stop_marvin = nh_->advertise<actionlib_msgs::GoalID> 
@@ -120,6 +122,8 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   marvin_relocalize = nh_->advertise<geometry_msgs::PoseWithCovarianceStamped>("/marvin/initialpose",100,true);
   marvin_fixed_frame = "marvin/level_mux_map";
   roberto_fixed_frame = "roberto/level_mux_map";
+  make_plan_client_marvin = nh_->serviceClient<nav_msgs::GetPlan>("marvin/move_base/NavfnROS/make_plan");
+  make_plan_client_marvin.waitForExistence();
   while(!marvin_ac.waitForServer(ros::Duration(5.0))){
     ROS_INFO("Waiting for the move_base action server to come up");
   }
@@ -208,27 +212,40 @@ void Pass_Hallway::stopRobot(Client *client){
   client -> cancelGoal();
 }
 
-bool Pass_Hallway::collision(const Point &roberto_odom, const Point &marvin_odom){
-  float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
-  ROS_INFO_STREAM(odom_distance);
-  if(odom_distance>0.01 && odom_distance < 1.0){
-  	if(!robotsClose){
-  		robotsClose = true;
-  		closeStartTime = (float)clock();
-  	}
-  }else if(odom_distance>2 && odom_distance < 30){
-  	robotsClose = false;
-  }
-  if(robotsClose){
-  	if(((float)clock()-closeStartTime)/CLOCKS_PER_SEC > 5){
-  		return true;
-  	}
-  }
-  if(roberto_odom.x - marvin_odom.x < -1){
-  	successfulPass = true;
-  	return true;
-  }
-  return false;
+bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point &marvin_odom){
+	if(!successfulPass){
+		//distance between robot odometries
+		float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
+		//ROS_INFO_STREAM(odom_distance);
+		//set robotsClose based on odom_distance
+		if(odom_distance>0.01 && odom_distance < 1.0){
+			if(!robotsClose){
+				robotsClose = true;
+				closeStartTime = ros::Time::now().toSec();
+			}
+		}else if(odom_distance>2 && odom_distance < 30){
+			robotsClose = false;
+		}
+		//calculate how long the robots have been close 
+		if(robotsClose){
+			if((ros::Time::now().toSec()-closeStartTime) > 10){
+				collision = true;
+				return true;
+			}
+		}
+		//detect a pass
+		if(roberto_odom.x - marvin_odom.x < -1){
+			successfulPass = true;
+		}
+	}
+	else{
+		//detect if robots have gotten close to the others' starting point
+		if(roberto_odom.x < x_hallway_min + 1 && marvin_odom.x > x_hallway_max - 1){
+			goalsReached = true;
+			return true;
+		}
+	}
+    return false;
 }
 
 bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom){
@@ -248,19 +265,20 @@ bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom
 
 void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom)
 { 
-  ROS_INFO("in callback");
-  if(collision(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
+  //ROS_INFO("in callback");
+  if(evaluateRobotDistance(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
   	ROS_INFO("stopping");
-  	//stopRobot(marvin_client);
-  	//stopRobot(roberto_client);
+  	stopRobot(marvin_client);
+  	stopRobot(roberto_client);
   	reset = true;
-  	float timeUsed;
-  	if(successfulPass){
-  		timeUsed = ((float)clock() - episodeStartTime)/CLOCKS_PER_SEC;
+  	double reward;
+  	if(goalsReached){
+  		reward = 20.0 - (ros::Time::now().toSec() - episodeStartTime);
   	}else{
-  		timeUsed = 120.0;
+  		reward = -1000;
   	}
-  	myfile << " Time:" << timeUsed << "\n";
+  	ros::Duration(2).sleep();
+  	myfile << "Reward: " << reward << "\n";
   }
   move_base_msgs::MoveBaseGoal marv_goal;
   move_base_msgs::MoveBaseGoal rob_goal;
@@ -269,15 +287,22 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   marv_goal.target_pose.header.stamp = ros::Time::now();
 
   //marv_goal.target_pose.pose.position.z = 0;
-  marv_goal.target_pose.pose.position.x = 25;
-  marv_goal.target_pose.pose.position.y = 8.1;
+  
+  if(successfulPass){
+  	marv_goal.target_pose.pose.position.x = 25;
+    marv_goal.target_pose.pose.position.y = 8.1;
+    marv_goal.target_pose.pose.position.z = 0;
+    tf::Quaternion marvin_quat;
+    marvin_quat.setRPY(0.0, 0.0, 0.0);
+    tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
+  }else{
+    marv_goal.target_pose.pose = waypoint;
+    ROS_INFO_STREAM("x:" << waypoint.position.x << "y: " << waypoint.position.y);
+  }
+  
 
   
   //marv_goal.target_pose.pose.orientation = marvin_odom->pose.pose.orientation;
-  tf::Quaternion marvin_quat;
-  marvin_quat.setRPY(0.0, 0.0, 0.0);
-  tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
-  
 
   rob_goal.target_pose.header.frame_id = "roberto/level_mux_map";
   rob_goal.target_pose.header.stamp = ros::Time::now();
@@ -307,6 +332,104 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
 
 void Pass_Hallway::get_waypoint()
 {
+	int gridHeight = 5;
+	int gridWidth = 5;
+	//don't consider waypoints more than one meter past the midpoint
+	float hallwayWidth = (x_hallway_max-x_hallway_min)/2 + 1;
+	for(int i = 0; i <= gridWidth; i++){
+		float x = (i * hallwayWidth/gridWidth) + x_hallway_min;
+		for(int j = 0; j <= gridHeight; j++){
+			for(int k = -1; k < 2; k++){
+				float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
+				GetPlan srv;
+			    geometry_msgs::PoseStamped &start = srv.request.start;
+			    geometry_msgs::PoseStamped &goal = srv.request.goal;
+			    start.header.frame_id = goal.header.frame_id = marvin_fixed_frame;
+				start.header.stamp = goal.header.stamp = ros::Time::now();
+
+				start.pose.position.x = x_hallway_min;
+				start.pose.position.y = 8.1;
+				start.pose.position.z = 0;
+				tf::Quaternion start_quat;
+				start_quat.setRPY(0.0, 0.0, 0.0);
+				tf::quaternionTFToMsg(start_quat, start.pose.orientation);
+				tf::Quaternion goal_quat;
+				float yaw = k * (3.14159/2);
+				goal_quat.setRPY(0.0, 0.0, yaw);
+				tf::quaternionTFToMsg(goal_quat, goal.pose.orientation);
+				goal.pose.position.x = globalX;
+				goal.pose.position.y = globalY;
+				goal.pose.position.z = 0; 
+				srv.request.tolerance = 0.5 + 1e-6;
+
+				if (make_plan_client_marvin.call(srv)) {
+				    if (srv.response.plan.poses.size() != 0) {
+			 			ROS_INFO("valid");
+			 			valid = true;
+				    } else {        
+				        ROS_INFO_STREAM("not valid");
+				        //myfile<<"empty plan\n";
+				    }
+				} else {
+				    ROS_INFO_STREAM("service failed");
+				}
+			}	
+		}
+	}
+/*	bool valid = false;
+	while(!valid){
+		int gridHeight = 5;
+		int gridWidth = 5;
+		int randH = rand() % (gridHeight+1);
+		int randW = rand() % (gridWidth+1);
+		float localY = randH * (y_hallway_max-y_hallway_min)/gridHeight;
+		//don't consider waypoints more than one meter past the midpoint
+		float hallwayWidth = (x_hallway_max-x_hallway_min)/2 + 1;
+		float localX = randW * hallwayWidth/gridWidth;
+		float globalY = localY + y_hallway_min;
+		float globalX = localX + x_hallway_min;
+		GetPlan srv;
+	    geometry_msgs::PoseStamped &start = srv.request.start;
+	    geometry_msgs::PoseStamped &goal = srv.request.goal;
+	    start.header.frame_id = goal.header.frame_id = marvin_fixed_frame;
+		start.header.stamp = goal.header.stamp = ros::Time::now();
+
+		start.pose.position.x = x_hallway_min;
+		start.pose.position.y = 8.1;
+		start.pose.position.z = 0;
+		tf::Quaternion start_quat;
+		start_quat.setRPY(0.0, 0.0, 0.0);
+		tf::quaternionTFToMsg(start_quat, start.pose.orientation);
+
+		//generate random yaw
+		tf::Quaternion goal_quat;
+		float yaw = (rand()%4) * (3.14159/2);
+		goal_quat.setRPY(0.0, 0.0, yaw);
+		tf::quaternionTFToMsg(goal_quat, waypoint.orientation);
+		waypoint.position.x = globalX;
+		waypoint.position.y = globalY;
+		waypoint.position.z = 0; 
+		goal.pose = waypoint;
+		/*tf::quaternionTFToMsg(goal_quat, goal.pose.orientation);
+
+		goal.pose.position.x = globalX;
+		goal.pose.position.y = globalY;
+		goal.pose.position.z = 0;
+		srv.request.tolerance = 0.5 + 1e-6;
+
+		if (make_plan_client_marvin.call(srv)) {
+		    if (srv.response.plan.poses.size() != 0) {
+	 			ROS_INFO("valid");
+	 			valid = true;
+		    } else {        
+		        ROS_INFO_STREAM("not valid");
+		        //myfile<<"empty plan\n";
+		    }
+		} else {
+		    ROS_INFO_STREAM("service failed");
+		}
+	}
+	*/
 	// generate random waypoint
 
 	// check feasibility with global planner
@@ -331,19 +454,20 @@ void Pass_Hallway::run()
 
   //roberto_client->stopTrackingGoal();
   //resumeRobot(roberto_client,marvin_door);
-  marvin_door = "e3_3";
-  roberto_door = "e3_4";
   reset_positions();
   //reset again to ensure proper localization
   reset_positions();
 
   //calculate waypoints, phi
   get_waypoint();
+  
 
   reset = false;
   robotsClose = false;
   successfulPass = false;
-  episodeStartTime = (float)clock();
+  collision = false;
+  goalsReached = false;
+  episodeStartTime = ros::Time::now().toSec();
 
   ROS_INFO("in run");
   message_filters::Subscriber<nav_msgs::Odometry> marvin_odom(*nh_, "/marvin/odom", 1);
