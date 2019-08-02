@@ -39,6 +39,7 @@ public:
 	Pass_Hallway(ros::NodeHandle* nh,int runs);
 	void run();
 	void readFile();
+	void countResults();
 	void laser_callback(const sensor_msgs::LaserScan::ConstPtr& scan);
 	void callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom);
 	bool checkRobotsMovingAway(vector<int> &distances);
@@ -114,7 +115,7 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   nh_ -> setParam("marvin/move_base/recovery_behavior_enabled", false);
   readFile();
   srand(time(NULL));
-  myfile.open("testfile.txt");
+  myfile.open("fakeout.txt");
   if(!myfile.is_open()){
     ROS_INFO("not open");
     exit(1);
@@ -153,6 +154,49 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
   	// append \phi, reward to running text file
   }
 }
+
+void Pass_Hallway::countResults(){
+	ifstream source("ttestfile.txt");
+	ROS_INFO("incount");
+	int to = 0;
+	int back = 0;
+	int lineNum = 0;
+	for(std::string line; std::getline(source, line); )   //read stream line by line
+	{
+	    std::istringstream in(line);      //make a stream for the line itself
+	    if(lineNum%2 == 1){	
+	    	float value;
+	    	in >> value;
+			if(value == -999){
+				to++;
+			}else if(value == -1001){
+				back++;
+			}
+		}
+		lineNum++;
+	}
+	ROS_INFO_STREAM("Time out: " << to << "Backwards: " << back);
+}
+
+void analyzeResults(){
+	ifstream source("results3.txt");
+	ofstream myfile("out.txt");
+	int lineNum = 0;
+	for(std::string line; std::getline(source, line); )   //read stream line by line
+	{
+	    std::istringstream in(line);      //make a stream for the line itself
+	    if(lineNum%2 == 1){	
+	    	float value;
+	    	in >> value;
+		}else{
+			float x,y,theta;
+			in >> x >> y >> theta;
+			myfile << x << " " << y << " " << theta;
+		}
+		lineNum++;
+	}
+}
+
 
 void Pass_Hallway::readFile(){
 	ifstream source("phi.txt");
@@ -403,7 +447,8 @@ void Pass_Hallway::laser_callback(const sensor_msgs::LaserScan::ConstPtr& scan){
 }
 
 void Pass_Hallway::get_waypoint(){
-	int index = rand() % phiList.size();
+	//int index = rand() % phiList.size();
+	int index = rand() % 3;
 	tf::Quaternion goal_quat;
 	goal_quat.setRPY(0.0, 0.0, phiList.at(index).at(2));
 	tf::quaternionTFToMsg(goal_quat, waypoint.orientation);
@@ -611,7 +656,7 @@ void Pass_Hallway::run()
   goalsReached = false;
   roberto_center = false;
   marvin_center = false;
-  time_out = false;
+  timeOut = false;
   episodeStartTime = ros::Time::now().toSec();
 
   ROS_INFO("in run");
@@ -634,7 +679,7 @@ int main(int argc, char**argv) {
   ROS_INFO("in main");
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
-  
+  //analyzeResults();
   Pass_Hallway pass_hallway(&nh,500);
   
   /*for(int i = 0; i<1000;i++){
