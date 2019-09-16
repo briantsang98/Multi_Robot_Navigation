@@ -422,14 +422,6 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   	marvin_ac.sendGoal(marv_goal);
     //roberto_ac.sendGoal(rob_goal);
   }
-  /*while(!collision(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
-
-	if(marvin_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED
-		&& roberto_client->getState() == actionlib::SimpleClientGoalState::SUCCEEDED){
-	  times.push_back((float)(clock()-start)/CLOCKS_PER_SEC);
-	  break;
-	}
-  }*/
 }
 
 void Pass_Hallway::laser_callback(const sensor_msgs::LaserScan::ConstPtr& scan){
@@ -639,18 +631,6 @@ void Pass_Hallway::get_waypoints()
 void Pass_Hallway::run() 
 {
   
-  /*ros::ServiceClient robot_clear_client = 
-            nh_->serviceClient<std_srvs::Empty>("roberto/move_base/clear_costmaps");
-  robot_clear_client.waitForExistence();
-  std_srvs::Empty empty;
-  robot_clear_client.call(empty);*/
-  
-  //ros::Duration(2).sleep();
-
-  //roberto_client->stopTrackingGoal();
-  //resumeRobot(roberto_client,marvin_door);
-
- 
   reset_positions();
   //reset again to ensure proper localization
   reset_positions();
