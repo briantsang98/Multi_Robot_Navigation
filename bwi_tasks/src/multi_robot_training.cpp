@@ -91,11 +91,11 @@ protected:
     float x_hallway_max = 24.0;
     float y_hallway_min = 6.5;
     float y_hallway_max = 9.25;*/
-    float marvin_start_x = 0;
+    float marvin_start_x = 7;
     float marvin_start_y = 9.5;
     float roberto_start_x = 17;
     float roberto_start_y = 9.5;
-    float x_hallway_min = 0;
+    float x_hallway_min = 7;
     float x_hallway_max = 17;
     float y_hallway_min = marvin_start_y - 0.4;
     float y_hallway_max = marvin_start_y + 0.4;
@@ -166,7 +166,7 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
 
 
 void Pass_Hallway::readFile(){
-	ifstream source("simplePhi_2.txt");
+	ifstream source("simplePhi_3.txt");
 	if(source.is_open()){
 		ROS_INFO("open");
 	}else{
@@ -266,7 +266,7 @@ bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point 
 		float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
 		//ROS_INFO_STREAM(odom_distance);
 
-		/**
+		
 		//set robotsClose based on odom_distance
 		if(odom_distance>0.01 && odom_distance < 1.0){
 			if(!robotsClose){
@@ -283,7 +283,7 @@ bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point 
 				return true;
 			}
 		}
-		**/
+		
 		if(odom_distance>0.01 && odom_distance < 0.7){
 			collision = true;
 			return true;
@@ -322,18 +322,18 @@ bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom
 		roberto_stuck = true;
 		//return true;
 	}else if(timeElapsed > 5 && marvin_odom.x < x_hallway_min+0.2){
-		stuck = true;
-		return true;
+		//stuck = true;
+		//return true;
 	}
 	if(timeElapsed > 50){
 		timeOut = true;
 		return true;
 	}
-/*	if(roberto_center&&waypoint.position.x != 18 && marvin_odom.x < 18.3){
+	/*if(roberto_center&&waypoint.position.x != 18 && marvin_odom.x < 18.3){
 		stuck = true;
 		return true;
 	}
-	if(marvin_center && roberto_odom.x > 27.8){		
+	if(marvin_center && roberto_odom.x > 16.8){		
 		roberto_stuck = true;
 		return true;
 	}*/
@@ -344,7 +344,7 @@ bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom
 void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odometry::ConstPtr &marvin_odom)
 { 
   //ROS_INFO("in callback");
-  /*if(evaluateRobotDistance(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)
+  if(evaluateRobotDistance(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)
   	||backwards(roberto_odom->pose.pose.position,marvin_odom->pose.pose.position)){
   	ROS_INFO("stopping");
   	marvin_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
@@ -355,14 +355,14 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
 
 	if(goalsReached){
   		reward = 10.0 - (ros::Time::now().toSec() - episodeStartTime);
+  	}else if(roberto_stuck){
+  		reward = -997;
   	}else if(timeOut){
   		reward = -1001;
   	}else if(collision){
   		reward = -1000;
   	}else if(backward){
   		reward = -999;
-  	}else if(roberto_stuck){
-  		reward = -997;
   	}else if (stuck){
   		reward = -998;
   	}
@@ -371,7 +371,7 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
 
   	ros::Duration(3).sleep();
   	reset = true;
-  }*/
+  }
   move_base_msgs::MoveBaseGoal marv_goal;
   move_base_msgs::MoveBaseGoal rob_goal;
 
@@ -386,13 +386,13 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
     marvin_quat.setRPY(0.0, 0.0, 0.0);
     tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
   }else{
-/*  	marv_goal.target_pose.pose.position.x = 16;
+  	marv_goal.target_pose.pose.position.x = 16;
     marv_goal.target_pose.pose.position.y = 6.5;
     marv_goal.target_pose.pose.position.z = 0;
     tf::Quaternion marvin_quat;
     marvin_quat.setRPY(0.0, 0.0, 0.0);
     tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
-  */
+  
     marv_goal.target_pose.pose = waypoint;
     //ROS_INFO_STREAM("x:" << waypoint.position.x << "y: " << waypoint.position.y);
   }
@@ -420,7 +420,7 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
   
   if(!reset){
   	marvin_ac.sendGoal(marv_goal);
-    //roberto_ac.sendGoal(rob_goal);
+    roberto_ac.sendGoal(rob_goal);
   }
 }
 
@@ -462,14 +462,15 @@ void Pass_Hallway::get_waypoint(){
 
 void Pass_Hallway::get_waypoints()
 {
-	int gridHeight = 6;
+	int gridHeight = 1;
 	int gridWidth = 4;
 	//don't consider waypoints more than one meter past the midpoint
 	float hallwayWidth = (x_hallway_max-x_hallway_min)/2;
 	for(int i = 0; i <= gridWidth; i++){
 		float x = (i * hallwayWidth/gridWidth) + x_hallway_min;
 		for(int j = 0; j <= gridHeight; j++){
-			float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
+			//float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
+			float y = 10;
 			GetPlan srv;
 			ROS_INFO_STREAM("x: " << x <<"y: "<<y);
 		    geometry_msgs::PoseStamped &start = srv.request.start;
@@ -634,7 +635,7 @@ void Pass_Hallway::run()
   reset_positions();
   //reset again to ensure proper localization
   reset_positions();
-  ros::Duration(5).sleep();
+  ros::Duration(3).sleep();
   //calculate waypoints, phi
   /*get_waypoints();
   return;*/
@@ -673,7 +674,7 @@ int main(int argc, char**argv) {
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   //analyzeResults();
-  Pass_Hallway pass_hallway(&nh,1);
+  Pass_Hallway pass_hallway(&nh,500);
   
   /*for(int i = 0; i<1000;i++){
   	pass_hallway.run();
