@@ -23,7 +23,7 @@
         </constraints>
       </ode>
       <real_time_update_rate>3000.000000</real_time_update_rate>
-      <max_step_size>0.001000</max_step_size>
+      <max_step_size>0.0010000</max_step_size>
     </physics>
     <model name="plane1_model">
       <link name="body">
