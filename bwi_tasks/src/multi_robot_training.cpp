@@ -94,15 +94,15 @@ protected:
     float y_hallway_min = 6.5;
     float y_hallway_max = 9.25;*/
     float marvin_start_x = 7;
-    float marvin_start_y = 9.5;
+    float marvin_start_y = 9.55;
     float roberto_start_x = 17;
-    float roberto_start_y = 9.5;
+    float roberto_start_y = 9.55;
     float x_hallway_min = 7;
     float x_hallway_max = 17;
-    float y_hallway_min = marvin_start_y - 0.4;
-    float y_hallway_max = marvin_start_y + 0.4;
+    float y_hallway_min = 9.17;//marvin_start_y - 0.4;
+    float y_hallway_max = 10.07;//marvin_start_y + 0.4;
     float marvin_final_x = 30.0;
-    float marvin_final_y = 9.5;
+    float marvin_final_y = 9.55;
     float PI = 3.14159;
     float maxes[3];
     float phiSize = 6;//14;
@@ -168,7 +168,7 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
 
 
 void Pass_Hallway::readFile(){
-	ifstream source("/home/brian/catkin_ws/simplePhi_1.txt");
+	ifstream source("/home/brian/catkin_ws/odd_phi.txt");
 	if(source.is_open()){
 		ROS_INFO("open");
 	}else{
@@ -234,7 +234,7 @@ void Pass_Hallway::reset_positions(){
   geometry_msgs::PoseWithCovarianceStamped marvin_pose;
   marvin_pose.header.frame_id = marvin_fixed_frame;
   marvin_pose.header.stamp = ros::Time::now();
-  marvin_pose.pose.pose.position.x = marvin_start.position.x;
+  marvin_pose.pose.pose.position.x = marvin_start.position.x-3;
   marvin_pose.pose.pose.position.y = marvin_start.position.y;
   marvin_pose.pose.pose.position.z = marvin_start.position.z;
   tf::quaternionTFToMsg(marvin_quat, marvin_pose.pose.pose.orientation);
@@ -309,7 +309,7 @@ bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point 
 }
 
 bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom){
-	if(roberto_odom.x < x_hallway_max-2){
+	if(roberto_odom.x < x_hallway_max-4){
 		roberto_center = true;
 	}else if(roberto_center || roberto_odom.x > x_hallway_max+1){
 		backward = true;
@@ -329,7 +329,7 @@ bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom
 		//stuck = true;
 		//return true;
 	}
-	if(timeElapsed > 50){
+	if(timeElapsed > 60){
 		timeOut = true;
 		return true;
 	}
@@ -384,7 +384,8 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
     marv_goal.target_pose.header.stamp = ros::Time::now();
     
     if(successfulPass){
-  	marv_goal.target_pose.pose.position.x = roberto_start_x+1;
+      stuck = false;
+  	  marv_goal.target_pose.pose.position.x = roberto_start_x+1;
       marv_goal.target_pose.pose.position.y = roberto_start_y;
       marv_goal.target_pose.pose.position.z = 0;
       tf::Quaternion marvin_quat;
@@ -422,8 +423,8 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
     roberto_quat.setRPY(0.0, 0.0, 3.14159);
     tf::quaternionTFToMsg(roberto_quat, rob_goal.target_pose.pose.orientation);
     if(!reset){
-      marvin_ac.sendGoal(marv_goal);
       roberto_ac.sendGoal(rob_goal);
+      marvin_ac.sendGoal(marv_goal);
     }
   }
 }
@@ -466,15 +467,15 @@ void Pass_Hallway::get_waypoint(){
 
 void Pass_Hallway::get_waypoints()
 {
-	int gridHeight = 1;
-	int gridWidth = 4;
+	int gridHeight = 6;
+	int gridWidth = 6;
 	//don't consider waypoints more than one meter past the midpoint
 	float hallwayWidth = (x_hallway_max-x_hallway_min)/2;
 	for(int i = 0; i <= gridWidth; i++){
 		float x = (i * hallwayWidth/gridWidth) + x_hallway_min;
 		for(int j = 0; j <= gridHeight; j++){
-			//float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
-			float y = 10;
+			float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
+			//float y = 10;
 			GetPlan srv;
 			ROS_INFO_STREAM("x: " << x <<"y: "<<y);
 		    geometry_msgs::PoseStamped &start = srv.request.start;
@@ -508,58 +509,7 @@ void Pass_Hallway::get_waypoints()
 					//phi.push_back(-(PI/4));
 					phi.push_back(marvin_distance);
 					phi.push_back(roberto_distance);
-					//phi.push_back(ip_distance);
 
-					//laser pointer block, not used anymore
-					/**
-		 			move_base_msgs::MoveBaseGoal marv_goal;
-
-					marv_goal.target_pose.header.frame_id = "marvin/level_mux_map";
-					marv_goal.target_pose.header.stamp = ros::Time::now();
-					marv_goal.target_pose.pose = goal.pose;
-					marvin_ac.sendGoalAndWait(marv_goal);
-
-					marvin_laser = nh_ -> subscribe("marvin/scan", 1, &Pass_Hallway::laser_callback,this);
-					ros::Duration(1.5).sleep();
-					ros::spinOnce();
-					ros::Duration(1.5).sleep();
-					phi.push_back(maxes[0]);
-					phi.push_back(maxes[1]);
-					phi.push_back(maxes[2]);
-					goal_quat.setRPY(0.0, 0.0, -(3*PI/4) - 1.309);
-					tf::quaternionTFToMsg(goal_quat, goal.pose.orientation);
-					marv_goal.target_pose.pose = goal.pose;
-					marvin_ac.sendGoalAndWait(marv_goal);
-					ros::Duration(1.5).sleep();
-					ros::spinOnce();
-					ros::Duration(1.5).sleep();
-					phi.push_back(maxes[0]);
-					phi.push_back(maxes[1]);
-					phi.push_back(maxes[2]);
-					goal_quat.setRPY(0.0, 0.0, -(6*PI/4) - 1.309);
-					tf::quaternionTFToMsg(goal_quat, goal.pose.orientation);
-					marv_goal.target_pose.pose = goal.pose;
-					marvin_ac.sendGoalAndWait(marv_goal);
-					ros::Duration(1.5).sleep();
-					ros::spinOnce();
-					ros::Duration(1.5).sleep();
-					phi.push_back(maxes[0]);
-					phi.push_back(maxes[1]);
-					for(int k = 0;k<phi.size();k++){
-						myfile << phi[k] << " ";
-					}
-					myfile<<"\n";
-					phi[2] = 0;
-					for(int k = 0;k<phi.size();k++){
-						myfile << phi[k] << " ";
-					}
-					myfile<<"\n";
-					phi[2] = PI/4;
-					for(int k = 0;k<phi.size();k++){
-						myfile << phi[k] << " ";
-					}
-					myfile<<"\n";
-					**/
 					phi.push_back(10.3-y); //hard coded walls, need to incorporate function
 					phi.push_back(y-8.7);
 					for(int k = 0;k<phi.size();k++){
@@ -577,60 +527,6 @@ void Pass_Hallway::get_waypoints()
 			}
 		}
 	}
-/*	bool valid = false;
-	while(!valid){
-		int gridHeight = 5;
-		int gridWidth = 5;
-		int randH = rand() % (gridHeight+1);
-		int randW = rand() % (gridWidth+1);
-		float localY = randH * (y_hallway_max-y_hallway_min)/gridHeight;
-		//don't consider waypoints more than one meter past the midpoint
-		float hallwayWidth = (x_hallway_max-x_hallway_min)/2 + 1;
-		float localX = randW * hallwayWidth/gridWidth;
-		float globalY = localY + y_hallway_min;
-		float globalX = localX + x_hallway_min;
-		GetPlan srv;
-	    geometry_msgs::PoseStamped &start = srv.request.start;
-	    geometry_msgs::PoseStamped &goal = srv.request.goal;
-	    start.header.frame_id = goal.header.frame_id = marvin_fixed_frame;
-		start.header.stamp = goal.header.stamp = ros::Time::now();
-
-		start.pose.position.x = x_hallway_min;
-		start.pose.position.y = 8.1;
-		start.pose.position.z = 0;
-		tf::Quaternion start_quat;
-		start_quat.setRPY(0.0, 0.0, 0.0);
-		tf::quaternionTFToMsg(start_quat, start.pose.orientation);
-
-		//generate random yaw
-		tf::Quaternion goal_quat;
-		float yaw = (rand()%4) * (3.14159/2);
-		goal_quat.setRPY(0.0, 0.0, yaw);
-		tf::quaternionTFToMsg(goal_quat, waypoint.orientation);
-		waypoint.position.x = globalX;
-		waypoint.position.y = globalY;
-		waypoint.position.z = 0; 
-		goal.pose = waypoint;
-		/*tf::quaternionTFToMsg(goal_quat, goal.pose.orientation);
-
-		goal.pose.position.x = globalX;
-		goal.pose.position.y = globalY;
-		goal.pose.position.z = 0;
-		srv.request.tolerance = 0.5 + 1e-6;
-
-		if (make_plan_client_marvin.call(srv)) {
-		    if (srv.response.plan.poses.size() != 0) {
-	 			ROS_INFO("valid");
-	 			valid = true;
-		    } else {        
-		        ROS_INFO_STREAM("not valid");
-		        //myfile<<"empty plan\n";
-		    }
-		} else {
-		    ROS_INFO_STREAM("service failed");
-		}
-	}
-	*/
 }
 
 void Pass_Hallway::run() 
@@ -642,7 +538,7 @@ void Pass_Hallway::run()
   reset_positions();
   ros::Duration(2).sleep();
   //calculate waypoints, phi
-  /*get_waypoints();
+/*  get_waypoints();
   return;*/
   get_waypoint();
   reset = false;
@@ -678,7 +574,7 @@ int main(int argc, char**argv) {
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   //analyzeResults();
-  Pass_Hallway pass_hallway(&nh,500);
+  Pass_Hallway pass_hallway(&nh,1500);
   
   /*for(int i = 0; i<1000;i++){
   	pass_hallway.run();
