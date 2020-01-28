@@ -17,6 +17,8 @@ catkin_package(CATKIN_DEPENDS actionlib_msgs bwi_msgs std_msgs plan_execution)
 
 include_directories(${catkin_INCLUDE_DIRS})
 
+set(CMAKE_CXX_FLAGS "-std=c++03 ${CMAKE_CXX_FLAGS}")
+
 add_executable(back_and_forth_node src/back_and_forth.cpp)
 add_dependencies(back_and_forth_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(back_and_forth_node ${catkin_LIBRARIES})
@@ -72,6 +74,10 @@ target_link_libraries(multi_robot_navigation ${catkin_LIBRARIES})
 add_executable(multi_robot_training src/multi_robot_training.cpp)
 add_dependencies(multi_robot_training ${catkin_EXPORTED_TARGETS})
 target_link_libraries(multi_robot_training ${catkin_LIBRARIES})
+
+add_executable(sample_safety_model src/sample_safety_model.cpp)
+add_dependencies(sample_safety_model ${catkin_EXPORTED_TARGETS})
+target_link_libraries(sample_safety_model ${catkin_LIBRARIES})
 
 add_executable(mt_node src/mt_node.cpp)
 add_dependencies(mt_node ${catkin_EXPORTED_TARGETS})

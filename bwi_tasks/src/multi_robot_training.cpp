@@ -87,22 +87,26 @@ protected:
     bool collision;
     bool stuck;
     bool roberto_stuck;
+    bool roberto_ready;
+    bool marvin_ready;
     std::vector<float> robot_;
 
     /*float x_hallway_min = 16.0;
     float x_hallway_max = 24.0;
     float y_hallway_min = 6.5;
     float y_hallway_max = 9.25;*/
-    float marvin_start_x = 7;
-    float marvin_start_y = 9.55;
-    float roberto_start_x = 17;
-    float roberto_start_y = 9.55;
-    float x_hallway_min = 7;
-    float x_hallway_max = 17;
-    float y_hallway_min = 9.17;//marvin_start_y - 0.4;
-    float y_hallway_max = 10.07;//marvin_start_y + 0.4;
-    float marvin_final_x = 30.0;
-    float marvin_final_y = 9.55;
+    float marvin_start = 11;
+    float roberto_start = 19;
+    float marvin_start_x = 9;
+    float marvin_start_y = 9.5;
+    float roberto_start_x = 21;
+    float roberto_start_y = 9.5;
+    float x_hallway_min = 9;
+    float x_hallway_max = 21;
+    float y_hallway_min = 9.1;//marvin_start_y - 0.4;
+    float y_hallway_max = 10.03;//marvin_start_y + 0.4;
+    float marvin_final_x = 16;
+    float marvin_final_y = 9.5;
     float PI = 3.14159;
     float maxes[3];
     float phiSize = 6;//14;
@@ -168,7 +172,7 @@ Pass_Hallway::Pass_Hallway( ros::NodeHandle* nh, int runs):marvin_ac("marvin/mov
 
 
 void Pass_Hallway::readFile(){
-	ifstream source("/home/brian/catkin_ws/odd_phi.txt");
+	ifstream source("/home/brian/catkin_ws/simplePhiShortJin.txt");
 	if(source.is_open()){
 		ROS_INFO("open");
 	}else{
@@ -234,7 +238,7 @@ void Pass_Hallway::reset_positions(){
   geometry_msgs::PoseWithCovarianceStamped marvin_pose;
   marvin_pose.header.frame_id = marvin_fixed_frame;
   marvin_pose.header.stamp = ros::Time::now();
-  marvin_pose.pose.pose.position.x = marvin_start.position.x-3;
+  marvin_pose.pose.pose.position.x = marvin_start.position.x;
   marvin_pose.pose.pose.position.y = marvin_start.position.y;
   marvin_pose.pose.pose.position.z = marvin_start.position.z;
   tf::quaternionTFToMsg(marvin_quat, marvin_pose.pose.pose.orientation);
@@ -269,24 +273,34 @@ bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point 
 		//distance between robot odometries
 		float odom_distance = sqrt(pow(marvin_odom.x-roberto_odom.x,2)+pow(marvin_odom.y-roberto_odom.y,2));
 		//ROS_INFO_STREAM(odom_distance);
-
-		
-		//set robotsClose based on odom_distance
-/*		if(odom_distance>0.01 && odom_distance < 1.0){
-			if(!robotsClose){
-				robotsClose = true;
-				closeStartTime = ros::Time::now().toSec();
-			}
-		}else if(odom_distance>2 && odom_distance < 30){
-			robotsClose = false;
-		}
-		//calculate how long the robots have been close 
-		if(robotsClose){
-			if((ros::Time::now().toSec()-closeStartTime) > 10){
-				collision = true;
-				return true;
-			}
-		}*/
+    
+    if(!marvin_ready && marvin_odom.x > marvin_start - 0.1 && !roberto_ready && roberto_odom.x < roberto_start + 0.1){
+      marvin_ready = true;
+      roberto_ready = true;
+      ROS_INFO("start");
+/*      marvin_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
+      roberto_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());*/
+      ros::Duration(10).sleep();
+      marvin_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
+      roberto_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
+      episodeStartTime = ros::Time::now().toSec();
+    }
+/*    if(!marvin_ready && marvin_ac.getState().toString().compare("SUCCEEDED") == 0){
+      marvin_ready = true;
+      marvin_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
+      if(roberto_ready){
+        ros::Duration(10).sleep();
+        episodeStartTime = ros::Time::now().toSec();
+      }
+    }
+    if(!roberto_ready && roberto_ac.getState().toString().compare("SUCCEEDED") == 0){
+      roberto_ready = true;
+      roberto_ac.cancelGoalsAtAndBeforeTime(ros::Time::now());
+      if(marvin_ready){
+        ros::Duration(10).sleep();
+        episodeStartTime = ros::Time::now().toSec();
+      }
+    }*/
 		
 		if(odom_distance>0.01 && odom_distance < 0.7){
 			collision = true;
@@ -311,36 +325,29 @@ bool Pass_Hallway::evaluateRobotDistance(const Point &roberto_odom, const Point 
 bool Pass_Hallway::backwards(const Point &roberto_odom, const Point &marvin_odom){
 	if(roberto_odom.x < x_hallway_max-4){
 		roberto_center = true;
-	}else if(roberto_center || roberto_odom.x > x_hallway_max+1){
+	}else if(roberto_center && roberto_odom.x > x_hallway_max+1){
 		backward = true;
 		return true;
 	}
-	if(marvin_odom.x > x_hallway_min+2){
+	if(marvin_odom.x > x_hallway_min+4){
 		marvin_center = true;
-	}else if(marvin_center || marvin_odom.x < x_hallway_min-1){
+	}else if(marvin_center && marvin_odom.x < x_hallway_min-1){
 		backward = true;
 		return true;
 	}
 	float timeElapsed = ros::Time::now().toSec() - episodeStartTime;
-	if(timeElapsed > 5 && roberto_odom.x > x_hallway_max-0.2){
+	if(timeElapsed > 30 && !roberto_ready){
 		roberto_stuck = true;
 		//return true;
 	}else if(timeElapsed > 5 && marvin_odom.x < x_hallway_min+0.2){
 		//stuck = true;
 		//return true;
 	}
-	if(timeElapsed > 60){
+	if(timeElapsed > 50){
 		timeOut = true;
 		return true;
 	}
-	/*if(roberto_center&&waypoint.position.x != 18 && marvin_odom.x < 18.3){
-		stuck = true;
-		return true;
-	}
-	if(marvin_center && roberto_odom.x > 16.8){		
-		roberto_stuck = true;
-		return true;
-	}*/
+	
 	return false;
 }
 
@@ -392,14 +399,17 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
       marvin_quat.setRPY(0.0, 0.0, 0.0);
       tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
     }else{
-    	marv_goal.target_pose.pose.position.x = 16;
-      marv_goal.target_pose.pose.position.y = 6.5;
+      if(marvin_ready && roberto_ready){
+        marv_goal.target_pose.pose = waypoint;
+      }else{
+        marv_goal.target_pose.pose.position.x = marvin_start+.1;
+        marv_goal.target_pose.pose.position.y = marvin_start_y;
+      }
       marv_goal.target_pose.pose.position.z = 0;
       tf::Quaternion marvin_quat;
       marvin_quat.setRPY(0.0, 0.0, 0.0);
       tf::quaternionTFToMsg(marvin_quat, marv_goal.target_pose.pose.orientation);
     
-      marv_goal.target_pose.pose = waypoint;
       //ROS_INFO_STREAM("x:" << waypoint.position.x << "y: " << waypoint.position.y);
     }
     
@@ -416,8 +426,12 @@ void Pass_Hallway::callback(const Odometry::ConstPtr &roberto_odom, const Odomet
     }else{
     	rob_goal.target_pose.pose.position.x = roberto_odom->pose.pose.position.x-2;
     }*/
-    rob_goal.target_pose.pose.position.x = marvin_start_x - 2;
-    rob_goal.target_pose.pose.position.y = marvin_start_y;
+    if(roberto_ready && marvin_ready){
+      rob_goal.target_pose.pose.position.x = marvin_start_x - 1;
+    }else{
+      rob_goal.target_pose.pose.position.x = roberto_start;
+    }
+    rob_goal.target_pose.pose.position.y = roberto_start_y;
     //rob_goal.target_pose.pose.orientation = roberto_odom->pose.pose.orientation;
     tf::Quaternion roberto_quat;
     roberto_quat.setRPY(0.0, 0.0, 3.14159);
@@ -467,17 +481,18 @@ void Pass_Hallway::get_waypoint(){
 
 void Pass_Hallway::get_waypoints()
 {
-	int gridHeight = 6;
+	int gridHeight = 8;
 	int gridWidth = 6;
 	//don't consider waypoints more than one meter past the midpoint
 	float hallwayWidth = (x_hallway_max-x_hallway_min)/2;
 	for(int i = 0; i <= gridWidth; i++){
 		float x = (i * hallwayWidth/gridWidth) + x_hallway_min;
-		for(int j = 0; j <= gridHeight; j++){
+		//float x = 12;
+    for(int j = 0; j <= gridHeight; j++){
 			float y = (j * (y_hallway_max-y_hallway_min)/gridHeight) + y_hallway_min;
-			//float y = 10;
+			//float y = 12;
 			GetPlan srv;
-			ROS_INFO_STREAM("x: " << x <<"y: "<<y);
+			//ROS_INFO_STREAM("x: " << x <<"y: "<<y);
 		    geometry_msgs::PoseStamped &start = srv.request.start;
 		    geometry_msgs::PoseStamped &goal = srv.request.goal;
 		    start.header.frame_id = goal.header.frame_id = marvin_fixed_frame;
@@ -519,11 +534,11 @@ void Pass_Hallway::get_waypoints()
 					phi.clear();
 		 			//valid = true;
 			    } else {        
-			        ROS_INFO_STREAM("not valid");
+			        //ROS_INFO_STREAM("not valid");
 			        //myfile<<"empty plan\n";
 			    }
 			} else {
-			    ROS_INFO_STREAM("service failed");
+			    //ROS_INFO_STREAM("service failed");
 			}
 		}
 	}
@@ -534,11 +549,21 @@ void Pass_Hallway::run()
   
   reset_positions();
   //reset again to ensure proper localization
-  ros::Duration(2).sleep();
+  ros::Duration(1).sleep();
   reset_positions();
-  ros::Duration(2).sleep();
+  ros::Duration(1).sleep();
   //calculate waypoints, phi
 /*  get_waypoints();
+  return;*/
+  /*clock_t t;
+  t = clock();
+  ROS_INFO_STREAM(t);
+  for(int i = 0; i<100;i++){
+    get_waypoints();
+  }
+  t = clock() - t;
+  ROS_INFO_STREAM(t);
+  ROS_INFO_STREAM((float)t/CLOCKS_PER_SEC);
   return;*/
   get_waypoint();
   reset = false;
@@ -552,6 +577,8 @@ void Pass_Hallway::run()
   backward = false;
   stuck = false;
   roberto_stuck = false;
+  roberto_ready = false;
+  marvin_ready = false;
   episodeStartTime = ros::Time::now().toSec();
 
   ROS_INFO("in run");
@@ -574,7 +601,7 @@ int main(int argc, char**argv) {
     // ros::NodeHandlePtr nh = boost::make_shared<ros::NodeHandle>();
   ros::NodeHandle nh;
   //analyzeResults();
-  Pass_Hallway pass_hallway(&nh,1500);
+  Pass_Hallway pass_hallway(&nh,1000);
   
   /*for(int i = 0; i<1000;i++){
   	pass_hallway.run();
